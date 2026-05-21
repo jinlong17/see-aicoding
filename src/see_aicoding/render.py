@@ -222,15 +222,14 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
     cpu_ratio_of_machine = (total_cpu / n_cpus) / 100.0  # 1.0 = saturating all cores
     mem_ratio = total_mem / vm.total if vm.total else 0
     columns = shutil.get_terminal_size((120, 24)).columns
-    compact = columns < 140
-    roomy = columns >= 170
-    bar_width = 12 if compact else 30 if not roomy else 38
+    compact = columns < 170
+    bar_width = 12 if compact else 26
     sys_bar_width = 6 if compact else 12
 
-    body = Table.grid(expand=True, padding=(0, 1))
+    body = Table.grid(expand=True, padding=(0, 2))
+    body.add_column(ratio=9, no_wrap=True)
     body.add_column(ratio=8, no_wrap=True)
     body.add_column(ratio=8, no_wrap=True)
-    body.add_column(ratio=7, no_wrap=True)
 
     brand = Text()
     brand.append("see-aicoding", style=f"bold {COLOR_TEXT}")
@@ -238,67 +237,72 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
 
     counts = Text()
     counts.append(f"{len(sessions)}", style=f"bold {COLOR_TEXT}")
-    counts.append(" sess   " if compact else " sessions   ", style=COLOR_MUTED)
+    counts.append(" sessions   ", style=COLOR_MUTED)
     counts.append(f"{sum(s.proc_count for s in sessions)}", style=f"bold {COLOR_TEXT}")
-    counts.append(" proc" if compact else " processes", style=COLOR_MUTED)
+    counts.append(" processes", style=COLOR_MUTED)
 
-    identity = Text()
+    system_identity = Text()
     host = socket.gethostname().split(".")[0]
-    identity.append(f"{getpass.getuser()}@{host}", style=f"bold {COLOR_TEXT}")
+    system_identity.append(f"{getpass.getuser()}@{host}", style=f"bold {COLOR_TEXT}")
     if not compact:
-        identity.append(f"  {system_name()}", style=COLOR_MUTED)
+        system_identity.append(f"  {system_name()}", style=COLOR_MUTED)
 
-    cpu = Text()
-    cpu.append("AI CPU ", style=f"bold {COLOR_TEXT}")
-    cpu.append_text(progress_bar(cpu_ratio_of_machine, 1.0, width=bar_width))
-    cpu.append(
+    ai_processor = Text()
+    ai_processor.append("AI processor ", style=f"bold {COLOR_TEXT}")
+    ai_processor.append_text(progress_bar(cpu_ratio_of_machine, 1.0, width=bar_width))
+    ai_processor.append(
         f" {total_cpu:.0f}% " if compact else f" {total_cpu:5.1f}% ",
         style=cpu_color(cpu_ratio_of_machine * 100),
     )
     cpu_share = (
-        f"{cpu_ratio_of_machine * 100:.0f}%/{n_cpus}c"
+        f"{cpu_ratio_of_machine * 100:.0f}% of {n_cpus} cores"
         if compact
         else f"{cpu_ratio_of_machine * 100:4.1f}%/{n_cpus} cores"
     )
-    cpu.append(cpu_share, style=COLOR_MUTED)
+    ai_processor.append(cpu_share, style=COLOR_MUTED)
 
-    mem = Text()
-    mem.append("AI MEM ", style=f"bold {COLOR_TEXT}")
-    mem.append_text(progress_bar(mem_ratio, 1.0, width=bar_width))
-    mem.append(f" {compact_size(total_mem)}", style=mem_color(total_mem))
-    mem_limit = (
+    ai_memory = Text()
+    ai_memory.append("AI memory ", style=f"bold {COLOR_TEXT}")
+    ai_memory.append_text(progress_bar(mem_ratio, 1.0, width=bar_width))
+    ai_memory.append(f" {compact_size(total_mem)}", style=mem_color(total_mem))
+    ai_memory_limit = (
         f"/{compact_size(vm.total)}"
         if compact
         else f"  {mem_ratio * 100:4.1f}% of {fmt_bytes(vm.total)}"
     )
-    mem.append(mem_limit, style=COLOR_MUTED)
+    ai_memory.append(ai_memory_limit, style=COLOR_MUTED)
 
-    machine_cpu = Text()
-    machine_cpu.append("SYS CPU ", style=f"bold {COLOR_MUTED}")
-    machine_cpu.append_text(progress_bar(machine_cpu_pct / 100.0, 1.0, width=sys_bar_width))
-    machine_cpu.append(f" {machine_cpu_pct:4.1f}% ", style=cpu_color(machine_cpu_pct))
-    machine_cpu.append(f"{physical_cpus}p/{n_cpus}c", style=COLOR_MUTED)
+    system_processor = Text()
+    system_processor.append("System processor ", style=f"bold {COLOR_MUTED}")
+    system_processor.append_text(progress_bar(machine_cpu_pct / 100.0, 1.0, width=sys_bar_width))
+    system_processor.append(f" {machine_cpu_pct:4.1f}% ", style=cpu_color(machine_cpu_pct))
+    processor_detail = (
+        f"{physical_cpus} physical cores"
+        if compact
+        else f"{physical_cpus} physical / {n_cpus} logical"
+    )
+    system_processor.append(processor_detail, style=COLOR_MUTED)
 
-    machine_mem = Text()
-    machine_mem.append("SYS MEM ", style=f"bold {COLOR_MUTED}")
-    machine_mem.append_text(progress_bar(vm.percent / 100.0, 1.0, width=sys_bar_width))
-    machine_mem.append(f" {compact_size(vm.used)}/{compact_size(vm.total)}", style=cpu_color(vm.percent))
-    machine_mem.append(f" {vm.percent:4.1f}%", style=COLOR_MUTED)
+    system_memory = Text()
+    system_memory.append("System memory ", style=f"bold {COLOR_MUTED}")
+    system_memory.append_text(progress_bar(vm.percent / 100.0, 1.0, width=sys_bar_width))
+    system_memory.append(f" {compact_size(vm.used)}/{compact_size(vm.total)}", style=cpu_color(vm.percent))
+    system_memory.append(f" {vm.percent:4.1f}%", style=COLOR_MUTED)
 
-    local = Text()
-    local.append("Local ", style=f"bold {COLOR_MUTED}")
+    local_storage = Text()
+    local_storage.append("Local storage ", style=f"bold {COLOR_MUTED}")
     if disk is None:
-        local.append("unavailable", style=COLOR_DIM)
+        local_storage.append("unavailable", style=COLOR_DIM)
     else:
-        local.append(f"{compact_size(disk.used)}/{compact_size(disk.total)}", style=cpu_color(disk.percent))
-        local.append(f" {disk.percent:4.1f}%", style=COLOR_MUTED)
+        local_storage.append(f"{compact_size(disk.used)}/{compact_size(disk.total)}", style=cpu_color(disk.percent))
+        local_storage.append(f" {disk.percent:4.1f}%", style=COLOR_MUTED)
 
-    net = Text()
-    net.append("NET ", style=f"bold {COLOR_MUTED}")
-    net.append("↓ ", style=COLOR_COOL)
-    net.append(compact_rate(history.net_recv_per_s), style=COLOR_TEXT)
-    net.append("  ↑ ", style=COLOR_OK)
-    net.append(compact_rate(history.net_sent_per_s), style=COLOR_TEXT)
+    network = Text()
+    network.append("Network ", style=f"bold {COLOR_MUTED}")
+    network.append("download ", style=COLOR_COOL)
+    network.append(compact_rate(history.net_recv_per_s), style=COLOR_TEXT)
+    network.append("   upload ", style=COLOR_OK)
+    network.append(compact_rate(history.net_sent_per_s), style=COLOR_TEXT)
 
     spark = (
         sparkline(history.total_cpu, scale_max=max(100.0, max(history.total_cpu)))
@@ -309,26 +313,28 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
     trend.append("Trend ", style=COLOR_MUTED)
     trend.append(spark or "collecting", style=COLOR_COOL if spark else COLOR_DIM)
 
-    ai_total = Text()
-    ai_total.append("AI RSS ", style=COLOR_MUTED)
-    ai_total.append(compact_size(total_mem), style=mem_color(total_mem))
-    ai_total.append("   AI CPU share ", style=COLOR_MUTED)
-    ai_total.append(f"{cpu_ratio_of_machine * 100:4.1f}%", style=cpu_color(cpu_ratio_of_machine * 100))
+    ai_summary = Text()
+    ai_summary.append("AI memory total ", style=COLOR_MUTED)
+    ai_summary.append(compact_size(total_mem), style=mem_color(total_mem))
+    ai_summary.append("   processor share ", style=COLOR_MUTED)
+    ai_summary.append(f"{cpu_ratio_of_machine * 100:4.1f}%", style=cpu_color(cpu_ratio_of_machine * 100))
 
     now = Text(
-        time.strftime("%H:%M:%S" if compact else "%Y-%m-%d %H:%M:%S"),
+        "Time " + time.strftime("%H:%M:%S" if compact else "%Y-%m-%d %H:%M:%S"),
         style=COLOR_TEXT,
     )
 
-    body.add_row(brand, counts, identity)
-    body.add_row(cpu, mem, machine_cpu)
-    body.add_row(trend, ai_total, machine_mem)
-    body.add_row(local, now, net)
+    body.add_row(brand, counts, system_identity)
+    body.add_row(ai_processor, ai_memory, now)
+    body.add_row(trend, ai_summary, system_processor)
+    body.add_row(Text("", style=COLOR_DIM), Text("", style=COLOR_DIM), system_memory)
+    body.add_row(Text("", style=COLOR_DIM), Text("", style=COLOR_DIM), local_storage)
+    body.add_row(Text("", style=COLOR_DIM), Text("", style=COLOR_DIM), network)
 
     return Panel(
         body,
         title=f"[bold {COLOR_TEXT}] see-aicoding [/]",
-        subtitle=f"[{COLOR_MUTED}]system + AI workload[/]",
+        subtitle=f"[{COLOR_MUTED}]AI workload with system context[/]",
         title_align="left",
         subtitle_align="right",
         border_style=COLOR_ACCENT,
@@ -359,7 +365,7 @@ def render_zone(
     # Zone header summary.
     header = Table.grid(expand=True, padding=(0, 1))
     header.add_column(ratio=1)
-    header.add_column(width=15, no_wrap=True, justify="right")
+    header.add_column(width=22, no_wrap=True, justify="right")
 
     bar = progress_bar(zone_cpu / n_cpus / 100.0, 1.0, width=18)
     bar_text = Text()
@@ -372,11 +378,11 @@ def render_zone(
 
     header.add_row(bar_text, counts)
     header.add_row(
-        Text(f"MEM {fmt_bytes(zone_mem)}", style=mem_color(zone_mem)),
-        Text(f"{zone_procs} procs", style=COLOR_MUTED),
+        Text(f"Memory {fmt_bytes(zone_mem)}", style=mem_color(zone_mem)),
+        Text(f"{zone_procs} processes", style=COLOR_MUTED),
     )
     if zone_projects:
-        header.add_row(Text("Projects", style=COLOR_MUTED), Text("P CPU Mem", style=COLOR_DIM))
+        header.add_row(Text("Projects", style=COLOR_MUTED), Text("Processes CPU Memory", style=COLOR_DIM))
         for project in zone_projects[:5]:
             header.add_row(project_name_text(project.name, prefix="  ◆ "), project_metric_text(project))
         if len(zone_projects) > 5:
@@ -402,8 +408,8 @@ def render_zone(
     )
     tbl.add_column("Session", overflow="ellipsis", no_wrap=True, ratio=2)
     tbl.add_column("CPU%", width=6, justify="right", no_wrap=True)
-    tbl.add_column("Mem", width=7, justify="right", no_wrap=True)
-    tbl.add_column("Up/P", width=6, justify="right", no_wrap=True)
+    tbl.add_column("Memory", width=8, justify="right", no_wrap=True)
+    tbl.add_column("Age/Project", width=11, justify="right", no_wrap=True)
     tbl.add_column("Status", width=8, no_wrap=True)
 
     if not visible:
@@ -631,7 +637,7 @@ def render_all(
     """Build the full layout: header + 3 zones + footer."""
     layout = Layout()
     layout.split_column(
-        Layout(name="header", size=6),
+        Layout(name="header", size=8),
         Layout(name="body", ratio=1),
         Layout(name="footer", size=1),
     )
