@@ -53,6 +53,7 @@ COLOR_MUTED = "#9aa8bd"
 COLOR_DIM = "#5f6f86"
 COLOR_PANEL = "#3b4a60"
 COLOR_EMPTY = "#172033"
+COLOR_TRACK = "#263247"
 TABLE_HEADER_STYLE = f"bold {COLOR_TEXT} on #202b3d"
 PROJECT_PALETTE = (
     "#b8a1ff",
@@ -184,13 +185,24 @@ BAR_FILLED = "▰"
 BAR_EMPTY = "▱"
 
 
-def progress_bar(value: float, total: float, width: int = 20, color: str | None = None) -> Text:
+def progress_bar(
+    value: float,
+    total: float,
+    width: int = 20,
+    color: str | None = None,
+    filled_char: str = BAR_FILLED,
+    empty_char: str = BAR_EMPTY,
+    empty_style: str = COLOR_EMPTY,
+    min_filled: int = 0,
+) -> Text:
     """ASCII progress bar: ▰▰▰▰▱▱▱▱  with optional color override."""
     if total <= 0:
         ratio = 0.0
     else:
         ratio = max(0.0, min(1.0, value / total))
     filled = int(ratio * width)
+    if ratio > 0 and min_filled > 0:
+        filled = min(width, max(min_filled, filled))
     if color is None:
         # Default: green→yellow→red gradient by ratio.
         if ratio >= 0.7:
@@ -202,8 +214,8 @@ def progress_bar(value: float, total: float, width: int = 20, color: str | None 
         else:
             color = COLOR_DIM
     txt = Text()
-    txt.append(BAR_FILLED * filled, style=color)
-    txt.append(BAR_EMPTY * (width - filled), style=COLOR_EMPTY)
+    txt.append(filled_char * filled, style=color)
+    txt.append(empty_char * (width - filled), style=empty_style)
     return txt
 
 
@@ -354,20 +366,30 @@ def render_zone(
     zone_projects = aggregate_project_stats(zone_sessions)
 
     # Zone header summary.
+    terminal_columns = shutil.get_terminal_size((120, 24)).columns
+    zone_bar_width = 22 if terminal_columns < 170 else 30
+    zone_capacity_pct = zone_cpu / n_cpus
     header = Table.grid(expand=True, padding=(0, 1))
     header.add_column(ratio=1)
     header.add_column(width=22, no_wrap=True, justify="right")
 
-    bar = progress_bar(zone_cpu / n_cpus / 100.0, 1.0, width=18)
-    bar_text = Text()
-    bar_text.append_text(bar)
-    bar_text.append(f"  {zone_cpu:5.1f}%", style=cpu_color(zone_cpu / n_cpus * 100))
+    bar_text = progress_bar(
+        zone_capacity_pct / 100.0,
+        1.0,
+        width=zone_bar_width,
+        color=color,
+        filled_char="█",
+        empty_char="░",
+        empty_style=COLOR_TRACK,
+        min_filled=1,
+    )
 
     counts = Text()
     counts.append(f"{len(zone_sessions)}", style=f"bold {color}")
     counts.append(" sessions", style=COLOR_MUTED)
 
-    header.add_row(bar_text, counts)
+    header.add_row(Text("Processor", style=COLOR_MUTED), counts)
+    header.add_row(bar_text, Text(f"{zone_capacity_pct:4.1f}% capacity", style=cpu_color(zone_capacity_pct)))
     header.add_row(
         Text(f"Memory {fmt_bytes(zone_mem)}", style=mem_color(zone_mem)),
         Text(f"{zone_procs} processes", style=COLOR_MUTED),
