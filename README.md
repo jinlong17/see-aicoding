@@ -21,7 +21,7 @@ Track Claude Code, Codex, OpenAI extensions, Cursor, child processes, CPU, memor
 │ Time 12:34:56   Network download 80K/s   upload 31K/s                    │
 │                         AI total 22 sessions   122 processes             │
 │                                             lijinlong@MacBook  macOS 26.4 │
-│ AI processor ▰▰▰▰▰▰▱▱▱▱ 172% 21%/8 cores   AI memory ▰▰▰▱▱ 3.1G          │
+│ AI processor ▰▰▱▱▱▱▱▱▱▱ 21% capacity (172% total)   AI memory ▰▰▰▱▱ 3.1G │
 │ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁    AI memory total 3.1G   processor share 21%       │
 │                                             System processor ▰▰▰▱ 37%     │
 │                                             System memory 13G/16G 84%     │
@@ -162,6 +162,8 @@ Sampling flow:
 ## Notes
 
 - macOS resident memory includes shared library pages, so Electron/V8 memory can read higher than private working set.
+- AI processor capacity is normalized to all CPU cores; the total value is the summed per-process CPU percentage.
+- System memory uses `total - available`, so the displayed size and percentage share the same pressure-oriented basis.
 - Network speed is sampled from OS network counters, so it shows current machine traffic, not per-AI-process traffic.
 - Pure extension API activity cannot always be separated from the Cursor Extension Host process.
 - Network activity is treated as a lightweight live/idle signal; reverse-DNS attribution is intentionally avoided.
