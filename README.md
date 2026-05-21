@@ -1,171 +1,147 @@
 # see-aicoding
 
-Live system-wide monitor for **Claude Code**, **Codex**, and **Cursor** AI coding processes on macOS / Linux. Identifies every Claude/Codex/Cursor session running on your machine, groups them by tool + project, walks the descendant process tree for accurate per-session totals, and renders a color-coded TUI dashboard with progress bars, sparklines, and a three-zone layout.
+<div align="center">
 
-Built for the common case: **you run multiple AI coding sessions across several projects at once** and want to know which one is eating your CPU / RAM.
+**A live terminal monitor for AI coding processes.**
 
-Preview:
+Track Claude Code, Codex, OpenAI extensions, Cursor, child processes, CPU, memory, uptime, and project attribution from one compact TUI.
 
+`pip install --user git+https://github.com/jinlong17/see-aicoding.git`
+
+</div>
+
+## Preview
+
+```text
+╭─ see-aicoding ─────────────────────────────────────────────────────────────╮
+│ see-aicoding   AI coding process monitor       22 sessions   122 processes│
+│ AI CPU ▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱ 172% 21%/8c   AI MEM ▰▰▰▱▱▱▱▱▱▱ 3.1G │
+│ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁    AI RSS 3.1G    SYS MEM ▰▰▰▰▰▰▰▰▱▱ 13G/16G│
+│ Local 436G/460G 94.8%    00:02:54       NET ↓ 80K/s  ↑ 31K/s       │
+╰───────────────────────────────────────────────── system + AI workload ────╯
+╭─ ◆ Claude ─────────────╮╭─ ◆ Codex / OpenAI ────╮╭─ ◆ Cursor IDE ─────────╮
+│ ▱▱▱▱▱▱▱▱  26.1% 14 sess ││ ▰▰▱▱▱▱▱▱  94.4% 6 sess││ ▰▱▱▱▱▱▱▱  52.2% 2 sess│
+│ Projects      P CPU Mem││ Projects      P CPU Mem││ Projects      P CPU Mem│
+│   ◆ Any2K   9p 2.1% 90M││   ◆ see      8p 18% 240M││   ◆ Any2K  42p 29% 1.2G│
+│   ◆ XAI     5p 0.8% 62M││   ◆ XAI      4p 1.4% 80M││   ◆ XAI    10p 3.0% 170M│
+│ ● XAI_Desktop · CLI    ││ ● 3 projects · Desktop││ ● 2 projects · Cursor │
+│ ● Any2K · Claude       ││   ◆ see-aicoding 8p   ││   ◆ Any2K 42p         │
+│ ● repo · Claude        ││   ◆ XAI_Desktop 4p    ││   ◆ XAI_Desktop 9p    │
+╰────────────────────────╯╰───────────────────────╯╰───────────────────────╯
 ```
-┌─ see-aicoding ────────────────────────────────────────────────────────┐
-│ AI CPU ▰▰▰▰▱▱▱▱▱▱▱▱▱▱ 243.2% 30.4%/8 cores  AI MEM ▰▰▰▱ 3.0GB 18.9% │
-│ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁▂▃▄▅▆     31 sessions  169 processes  12:34:56 │
-└────────────────────────────────────── AI coding process monitor ──────┘
-├─ 🅒 Claude ──────────┬─ 🅞 Codex / OpenAI ──┬─ 🅒 Cursor IDE ───────┤
-│ ▰▰▰▱▱▱▱▱▱▱  47%      │ ▰▰▰▰▰▰▰▰▱▱  145%     │ ▰▰▱▱▱▱▱▱▱▱  25%       │
-│ 14 sessions          │ 5 sessions           │ 1 session             │
-│ ● XAI_Desktop · CLI  │ ● (Codex Desktop)    │ ● (Cursor IDE)        │
-│   25.3% 165MB 🟢     │   118% 1.0GB 🔴      │   38.7% 920MB 🟢      │
-│ ● Any2K · CLI        │ ● XAI_Desktop · CLI  │                       │
-│   2.4%  88MB  🟢     │   26.3% 182MB 🟢     │ Installed AI exts:    │
-│ ● XAI_Desktop · ext  │   ├─ rustc 14.9%     │  ● Claude Code 2.1.118│
-│   2.7%  65MB  🟡     │   ├─ codex   7.2%    │  ● OpenAI ChatGPT     │
-│ ...                  │   └─ SkyCpUse 0.6%   │  ● GitHub Copilot     │
-└──────────────────────┴──────────────────────┴───────────────────────┘
-```
 
-## What it detects
+## What It Answers
 
-| Tool family | Detection |
+| Question | Where to look |
 |---|---|
-| Claude Code CLI (standalone) | `~/.local/share/claude/versions/...` and `@anthropic-ai/claude-code` |
-| Claude Code inside Cursor / VS Code | `~/.cursor/extensions/anthropic.claude-code-*` |
-| Codex Desktop App | `/Applications/Codex.app/` and Electron helper tree |
-| Codex CLI | `@openai/codex` and `~/.codex/` |
-| OpenAI / Codex extension in Cursor / VS Code | `openai.chatgpt-*`, `openai.codex-*` |
-| Other AI extensions | GitHub Copilot, Cline, Continue, Cody, Tabnine, Codeium |
-| Cursor IDE itself | `/Applications/Cursor.app/` |
-| MCP servers (children) | `@modelcontextprotocol/`, `mcp-server` |
-
-Each AI tool gets attributed to a **session** = root process + all descendants. The header shows machine-wide AI total; each zone shows its tool family's slice.
+| Which AI tool is using CPU? | Zone totals and `CPU%` rows |
+| Which projects are active? | Zone `Projects` rows and colored per-session project rows |
+| Is it a root process or helper? | Tree rows under each session |
+| Is it just idle noise? | `Status` column: `HOT`, `LIVE`, `WARM`, `IDLE` |
+| What AI extensions are installed? | Cursor zone extension inventory |
 
 ## Install
 
-### Option A — From GitHub (recommended, syncs across machines)
+From GitHub:
 
 ```bash
 pip install --user git+https://github.com/jinlong17/see-aicoding.git
 ```
 
-That installs the `see-aicoding` command into your `pip --user` bin (usually `~/.local/bin/` on Linux, `~/Library/Python/3.x/bin/` on macOS). Make sure that's on your `PATH`. Tip: if not, run `python3 -m site --user-base` to find the prefix.
-
-### Option B — pipx (isolated install, cleanest)
+With `pipx`:
 
 ```bash
 pipx install git+https://github.com/jinlong17/see-aicoding.git
 ```
 
-### Option C — From local clone (development)
+For local development:
 
 ```bash
 git clone https://github.com/jinlong17/see-aicoding.git
 cd see-aicoding
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 see-aicoding
 ```
 
-### Option D — Dedicated venv (no PATH pollution, what's used on the author's machine)
+If the command is not found after a `pip --user` install, add your Python user-base bin directory to `PATH`:
 
 ```bash
-python3 -m venv ~/.local/share/see-aicoding/venv
-~/.local/share/see-aicoding/venv/bin/pip install git+https://github.com/jinlong17/see-aicoding.git
-# Then create a tiny shell wrapper somewhere on $PATH:
-cat > /opt/homebrew/bin/see-aicoding << 'EOF'
-#!/bin/sh
-exec "$HOME/.local/share/see-aicoding/venv/bin/see-aicoding" "$@"
-EOF
-chmod +x /opt/homebrew/bin/see-aicoding
+python3 -m site --user-base
 ```
 
 ## Usage
 
 ```bash
-see-aicoding                  # live mode, default 1.5s refresh
-see-aicoding -i 0.5           # 0.5s refresh
-see-aicoding -a               # show idle sessions (< 0.5% CPU)
-see-aicoding --no-tree        # collapse descendants — one row per session
-see-aicoding --once           # single snapshot, no live loop (for logs/cron)
-see-aicoding --full-screen    # alternate-screen mode (no scrollback)
+see-aicoding                  # live dashboard, 1.5s refresh
+see-aicoding -i 0.5           # faster refresh
+see-aicoding --hide-idle      # hide sessions below 0.5% CPU
+see-aicoding --no-tree        # one row per session
+see-aicoding --once           # print one snapshot and exit
+see-aicoding --full-screen    # alternate-screen mode
 ```
 
 | Flag | Default | Effect |
-|---|---|---|
-| `-i / --interval SECS` | `1.5` | Refresh interval (minimum 0.5s) |
-| `-a / --all` | off | Show idle sessions instead of hiding them |
+|---|---:|---|
+| `-i / --interval SECS` | `1.5` | Refresh interval, minimum 0.5s |
+| `--hide-idle` | off | Hide sessions below 0.5% CPU |
+| `-a / --all` | shown | Show all sessions, kept for compatibility |
 | `--no-tree` | off | Hide descendant process tree |
-| `--once` | off | Single snapshot, exit |
-| `--full-screen` | off | Use alternate-screen TUI (clears terminal on exit) |
+| `--once` | off | Render one snapshot and exit |
+| `--full-screen` | off | Use terminal alternate screen |
 
-## Layout reference
+## Detection
 
-- **Header** — total AI CPU/MEM with progress bars, machine totals, sparkline trend of last 40 samples, session/process counts.
-- **Claude zone** — every Claude Code session (CLI + Cursor/VS Code extensions). Each row = one session = root process + descendant tree summary.
-- **Codex / OpenAI zone** — Codex Desktop app, Codex CLI, OpenAI ChatGPT / Codex extensions.
-- **Cursor IDE zone** — Cursor application itself + a list of installed AI extensions (whether running or not).
+| Tool family | Detection signal |
+|---|---|
+| Claude Code CLI | `~/.local/share/claude/versions/`, `@anthropic-ai/claude-code` |
+| Claude in Cursor / VS Code | `anthropic.claude-code-*` extension paths |
+| Codex Desktop | `/Applications/Codex.app/` and helper process tree |
+| Codex CLI | `@openai/codex`, `~/.codex/`, `codex` executable paths |
+| OpenAI extensions | `openai.chatgpt-*`, `openai.codex-*` |
+| Cursor IDE | `/Applications/Cursor.app/` |
+| Other AI extensions | Copilot, Cline, Continue, Cody, Tabnine, Codeium |
 
-Within each zone:
-- Sessions and child processes are sorted **newest first** (shortest uptime on top). CPU changes do not reshuffle rows.
-- CPU% / memory rows are color-graded: gray (< 5%) → green → yellow → red.
-- Status badge: 🔴 high-load (≥70%), 🟢 live (≥10% or has remote conn), 🟡 lite (≥1%), ⚪ idle.
-- Idle sessions (< 0.5% CPU) are hidden by default — use `-a` to show.
+## Project Labels
 
-## Cross-machine sync workflow
+Each session tries to show the project directory instead of only the app name.
 
-Once the GitHub repo is set up, syncing the tool to a new machine is one line:
+For CLI tools, the label usually comes from the root process cwd. For desktop shells such as Codex Desktop and Cursor, `see-aicoding` also looks through child process cwd values and Cursor extension-host process names. If multiple projects belong to one desktop app tree, the session row is shown as `N projects`, with colored project rows underneath. Zone headers show one project per line with process count, CPU, and memory.
 
-```bash
-pip install --user git+https://github.com/jinlong17/see-aicoding.git
-```
+Child processes are grouped under their detected project when the cwd or Cursor extension-host command exposes one. In a single-project session, helper processes without their own project signal are folded into that project. In a multi-project desktop session, unassigned helpers stay under `helpers` instead of being guessed into the wrong project.
 
-To update later:
+Ignored locations include app bundles, system directories, temporary directories, and extension/plugin cache folders.
 
-```bash
-pip install --user --upgrade --force-reinstall git+https://github.com/jinlong17/see-aicoding.git
-```
+## Stable Rows
 
-If you tweak something on machine A:
+Rows are sorted by creation time, newest first. CPU changes do not reshuffle rows.
 
-```bash
-# machine A
-git commit -am "tweak: new ext detection"
-git push
-
-# machine B
-pip install --user --upgrade --force-reinstall git+https://github.com/jinlong17/see-aicoding.git
-```
+All sessions are shown by default. Earlier versions hid idle sessions by default, which made Claude rows appear and disappear when CPU floated around the 0.5% threshold. Use `--hide-idle` only when you intentionally want a shorter, activity-only view.
 
 ## Architecture
 
-```
+```text
 src/see_aicoding/
-├── __init__.py
-├── __main__.py        # `python -m see_aicoding`
-├── cli.py             # argparse + main loop + Live
-├── monitor.py         # ProcSample, Sampler, Session, History, classify
-├── cursor_ext.py      # Cursor / VS Code extension inventory scanner
-└── render.py          # rich.Layout 3-zone view, panels, progress bars
+├── cli.py             # argparse, refresh loop, Live rendering
+├── monitor.py         # process sampling, classification, session aggregation
+├── render.py          # Rich layout, panels, colors, tables
+├── cursor_ext.py      # Cursor / VS Code AI extension scanner
+├── __main__.py        # python -m see_aicoding
+└── __init__.py
 ```
 
-**How a session is identified:**
-1. `Sampler.snapshot()` walks every `psutil` process owned by the current user and classifies it by command-line pattern (`claude-cli`, `claude-cursor`, `codex-desktop`, etc.).
-2. `build_sessions()` picks the topmost-of-its-kind process in each PPID chain as the session root — preventing Electron-helper explosion (Codex Desktop launches 70+ helpers; we collapse all of them into one Codex Desktop session).
-3. Every other process is attributed to its nearest session root via PPID walk.
-4. CPU% is delta-sampled (psutil holds a Process object across refreshes for accurate inter-sample CPU deltas).
+Sampling flow:
 
-**Known limitations:**
-- macOS RSS includes shared library pages (V8, Electron framework), so AI total memory is typically 10–15 % over the "true" private working set. For the use case of "which tool is hogging memory," it's the right granularity.
-- For purely API-based extensions (no subprocess), per-extension CPU isn't separable from the Cursor Extension Host process. The extensions inventory still shows whether each is installed.
-- Reverse-DNS lookup is intentionally not used to attribute network activity — the connection-count badge (🌐N) is a cheap proxy for "is this session talking to something."
+1. `Sampler.snapshot()` walks processes owned by the current user.
+2. `classify()` tags each process as Claude, Codex, Cursor, extension, MCP, or child.
+3. `build_sessions()` picks root processes and attributes descendants through the PPID chain.
+4. Project names are inferred from cwd, repo markers, and selected desktop app child processes.
+5. `render_all()` draws the header, three zones, footer, sparklines, and extension inventory.
 
-## Sync setup (first-time, after cloning to GitHub)
+## Notes
 
-```bash
-# In the see-aicoding repo on machine A:
-git remote add origin https://github.com/jinlong17/see-aicoding.git
-git branch -M main
-git push -u origin main
-
-# On any other machine:
-pip install --user git+https://github.com/jinlong17/see-aicoding.git
-```
+- macOS RSS includes shared library pages, so Electron/V8 memory can read higher than private working set.
+- Network speed is sampled from OS network counters, so it shows current machine traffic, not per-AI-process traffic.
+- Pure extension API activity cannot always be separated from the Cursor Extension Host process.
+- Network activity is treated as a lightweight live/idle signal; reverse-DNS attribution is intentionally avoided.
