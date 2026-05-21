@@ -20,6 +20,7 @@ import psutil
 
 KIND_CLAUDE_CLI = "claude-cli"
 KIND_CLAUDE_CURSOR = "claude-cursor"
+KIND_CLAUDE_DESKTOP = "claude-desktop"
 KIND_CODEX_DESKTOP = "codex-desktop"
 KIND_CODEX_CLI = "codex-cli"
 KIND_OPENAI_CURSOR = "openai-cursor"
@@ -32,6 +33,7 @@ KIND_OTHER = "other"
 ROOT_KINDS = {
     KIND_CLAUDE_CLI,
     KIND_CLAUDE_CURSOR,
+    KIND_CLAUDE_DESKTOP,
     KIND_CODEX_DESKTOP,
     KIND_CODEX_CLI,
     KIND_OPENAI_CURSOR,
@@ -47,6 +49,7 @@ ZONE_CURSOR = "cursor"
 ZONE_OF: dict[str, str] = {
     KIND_CLAUDE_CLI: ZONE_CLAUDE,
     KIND_CLAUDE_CURSOR: ZONE_CLAUDE,
+    KIND_CLAUDE_DESKTOP: ZONE_CLAUDE,
     KIND_CODEX_DESKTOP: ZONE_CODEX,
     KIND_CODEX_CLI: ZONE_CODEX,
     KIND_OPENAI_CURSOR: ZONE_CODEX,
@@ -58,6 +61,7 @@ ZONE_OF: dict[str, str] = {
 KIND_META: dict[str, tuple[str, str]] = {
     KIND_CLAUDE_CLI: ("Claude CLI", "#B48CFF"),
     KIND_CLAUDE_CURSOR: ("Claude in Cursor", "#B48CFF"),
+    KIND_CLAUDE_DESKTOP: ("Claude Desktop", "#B48CFF"),
     KIND_CODEX_DESKTOP: ("Codex Desktop", "#30D5A8"),
     KIND_CODEX_CLI: ("Codex CLI", "#30D5A8"),
     KIND_OPENAI_CURSOR: ("OpenAI/Codex in Cursor", "#30D5A8"),
@@ -85,6 +89,9 @@ PATTERNS_CLAUDE_CLI = (
 )
 PATTERNS_CLAUDE_CURSOR = (
     re.compile(r"/(?:\.cursor|\.vscode)/extensions/anthropic\.claude-code-"),
+)
+PATTERNS_CLAUDE_DESKTOP = (
+    re.compile(r"/Claude\.app/"),
 )
 PATTERNS_CODEX_DESKTOP = (
     re.compile(r"/Codex\.app/"),
@@ -121,6 +128,9 @@ def classify(p: "ProcSample") -> str:
     for pat in PATTERNS_CLAUDE_CURSOR:
         if pat.search(hay):
             return KIND_CLAUDE_CURSOR
+    for pat in PATTERNS_CLAUDE_DESKTOP:
+        if pat.search(hay):
+            return KIND_CLAUDE_DESKTOP
     for pat in PATTERNS_OPENAI_CURSOR:
         if pat.search(hay):
             return KIND_OPENAI_CURSOR
@@ -234,12 +244,14 @@ def derive_project(cwd: str | None) -> str:
 GENERIC_PROJECT_LABELS = {
     "—",
     "(claude daemon)",
+    "(Claude Desktop app)",
     "(Codex Desktop app)",
     "(Cursor IDE)",
 }
 
 FALLBACK_PROJECT_BY_KIND = {
     KIND_CODEX_DESKTOP: "(Codex Desktop app)",
+    KIND_CLAUDE_DESKTOP: "(Claude Desktop app)",
     KIND_CODEX_CLI: "(Codex CLI)",
     KIND_OPENAI_CURSOR: "(Cursor OpenAI/Codex ext)",
     KIND_OTHER_AI_CURSOR: "(AI extension)",
@@ -275,6 +287,8 @@ def session_project(p: "ProcSample") -> str:
     cmd = p.cmdline_str
     if "--bg-pty-host" in cmd or "--bg-spare" in cmd:
         return "(claude daemon)"
+    if p.kind == KIND_CLAUDE_DESKTOP and "/Claude.app/" in p.exe:
+        return "(Claude Desktop app)"
     if p.kind == KIND_CODEX_DESKTOP and "/Codex.app/Contents/MacOS/Codex" in p.exe:
         return "(Codex Desktop app)"
     if p.kind == KIND_CURSOR_IDE and "/Cursor.app/Contents/MacOS/Cursor" in p.exe:
