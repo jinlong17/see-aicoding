@@ -231,10 +231,6 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
     body.add_column(ratio=8, no_wrap=True)
     body.add_column(ratio=8, no_wrap=True)
 
-    brand = Text()
-    brand.append("see-aicoding", style=f"bold {COLOR_TEXT}")
-    brand.append("  AI monitor" if compact else "   AI coding process monitor", style=COLOR_MUTED)
-
     counts = Text()
     counts.append(f"{len(sessions)}", style=f"bold {COLOR_TEXT}")
     counts.append(" sessions   ", style=COLOR_MUTED)
@@ -297,13 +293,6 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
         local_storage.append(f"{compact_size(disk.used)}/{compact_size(disk.total)}", style=cpu_color(disk.percent))
         local_storage.append(f" {disk.percent:4.1f}%", style=COLOR_MUTED)
 
-    network = Text()
-    network.append("Network ", style=f"bold {COLOR_MUTED}")
-    network.append("download ", style=COLOR_COOL)
-    network.append(compact_rate(history.net_recv_per_s), style=COLOR_TEXT)
-    network.append("   upload ", style=COLOR_OK)
-    network.append(compact_rate(history.net_sent_per_s), style=COLOR_TEXT)
-
     spark = (
         sparkline(history.total_cpu, scale_max=max(100.0, max(history.total_cpu)))
         if history.total_cpu
@@ -319,17 +308,19 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
     ai_summary.append("   processor share ", style=COLOR_MUTED)
     ai_summary.append(f"{cpu_ratio_of_machine * 100:4.1f}%", style=cpu_color(cpu_ratio_of_machine * 100))
 
-    now = Text(
-        "Time " + time.strftime("%H:%M:%S" if compact else "%Y-%m-%d %H:%M:%S"),
-        style=COLOR_TEXT,
-    )
+    time_network = Text()
+    time_network.append("Time ", style=f"bold {COLOR_MUTED}")
+    time_network.append(time.strftime("%H:%M:%S" if compact else "%Y-%m-%d %H:%M:%S"), style=COLOR_TEXT)
+    time_network.append("   Network ", style=f"bold {COLOR_MUTED}")
+    time_network.append("download ", style=COLOR_COOL)
+    time_network.append(compact_rate(history.net_recv_per_s), style=COLOR_TEXT)
+    time_network.append("   upload ", style=COLOR_OK)
+    time_network.append(compact_rate(history.net_sent_per_s), style=COLOR_TEXT)
 
-    body.add_row(brand, counts, system_identity)
-    body.add_row(ai_processor, ai_memory, now)
-    body.add_row(trend, ai_summary, system_processor)
-    body.add_row(Text("", style=COLOR_DIM), Text("", style=COLOR_DIM), system_memory)
+    body.add_row(time_network, counts, system_identity)
+    body.add_row(ai_processor, ai_memory, system_processor)
+    body.add_row(trend, ai_summary, system_memory)
     body.add_row(Text("", style=COLOR_DIM), Text("", style=COLOR_DIM), local_storage)
-    body.add_row(Text("", style=COLOR_DIM), Text("", style=COLOR_DIM), network)
 
     return Panel(
         body,
@@ -637,7 +628,7 @@ def render_all(
     """Build the full layout: header + 3 zones + footer."""
     layout = Layout()
     layout.split_column(
-        Layout(name="header", size=8),
+        Layout(name="header", size=6),
         Layout(name="body", ratio=1),
         Layout(name="footer", size=1),
     )
