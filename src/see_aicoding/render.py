@@ -221,6 +221,8 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
     total_mem = sum(s.total_rss for s in sessions)
     cpu_ratio_of_machine = (total_cpu / n_cpus) / 100.0  # 1.0 = saturating all cores
     mem_ratio = total_mem / vm.total if vm.total else 0
+    system_memory_pressure = max(0, vm.total - vm.available)
+    system_memory_pct = (system_memory_pressure / vm.total * 100.0) if vm.total else 0.0
     columns = shutil.get_terminal_size((120, 24)).columns
     compact = columns < 170
     bar_width = 12 if compact else 26
@@ -247,15 +249,9 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
     ai_processor = Text()
     ai_processor.append("AI processor ", style=f"bold {COLOR_TEXT}")
     ai_processor.append_text(progress_bar(cpu_ratio_of_machine, 1.0, width=bar_width))
-    ai_processor.append(
-        f" {total_cpu:.0f}% " if compact else f" {total_cpu:5.1f}% ",
-        style=cpu_color(cpu_ratio_of_machine * 100),
-    )
-    cpu_share = (
-        f"{cpu_ratio_of_machine * 100:.0f}% of {n_cpus} cores"
-        if compact
-        else f"{cpu_ratio_of_machine * 100:4.1f}%/{n_cpus} cores"
-    )
+    capacity_pct = cpu_ratio_of_machine * 100.0
+    ai_processor.append(f" {capacity_pct:.0f}% capacity", style=cpu_color(capacity_pct))
+    cpu_share = f" ({total_cpu:.0f}% total)"
     ai_processor.append(cpu_share, style=COLOR_MUTED)
 
     ai_memory = Text()
@@ -282,9 +278,12 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
 
     system_memory = Text()
     system_memory.append("System memory ", style=f"bold {COLOR_MUTED}")
-    system_memory.append_text(progress_bar(vm.percent / 100.0, 1.0, width=sys_bar_width))
-    system_memory.append(f" {compact_size(vm.used)}/{compact_size(vm.total)}", style=cpu_color(vm.percent))
-    system_memory.append(f" {vm.percent:4.1f}%", style=COLOR_MUTED)
+    system_memory.append_text(progress_bar(system_memory_pct / 100.0, 1.0, width=sys_bar_width))
+    system_memory.append(
+        f" {compact_size(system_memory_pressure)}/{compact_size(vm.total)}",
+        style=cpu_color(system_memory_pct),
+    )
+    system_memory.append(f" {system_memory_pct:4.1f}%", style=COLOR_MUTED)
 
     local_storage = Text()
     local_storage.append("Local storage ", style=f"bold {COLOR_MUTED}")
