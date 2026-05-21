@@ -14,13 +14,12 @@ Track Claude Code, Codex, OpenAI extensions, Cursor, child processes, CPU, memor
 
 ```text
 ╭─ see-aicoding ─────────────────────────────────────────────────────────────╮
-│ see-aicoding   AI coding process monitor       22 sessions   122 processes│
+│ Time 12:34:56   Network download 80K/s   upload 31K/s  22 sessions 122 processes│
 │ AI processor ▰▰▰▰▰▰▱▱▱▱ 172% 21%/8 cores  AI memory ▰▰▰▱▱ 3.1G │
 │ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁    AI memory total 3.1G   processor share 21%│
 │                                           System processor ▰▰▰▱ 37%│
 │                                           System memory 13G/16G 84%│
 │                                           Local storage 436G/460G  │
-│                                           Network download 80K/s   │
 ╰─────────────────────────────── AI workload with system context ───────────╯
 ╭─ ◆ Claude ─────────────╮╭─ ◆ Codex / OpenAI ────╮╭─ ◆ Cursor IDE ─────────╮
 │ ▱▱▱▱▱▱▱▱ 26.1% 14 sessions││ ▰▰▱▱▱▱▱▱ 94.4% 6 sessions││ ▰▱▱▱▱▱▱▱ 52.2% 2 sessions│
