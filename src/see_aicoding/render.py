@@ -232,6 +232,7 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
     body.add_column(ratio=8, no_wrap=True)
 
     counts = Text()
+    counts.append("AI total ", style=f"bold {COLOR_MUTED}")
     counts.append(f"{len(sessions)}", style=f"bold {COLOR_TEXT}")
     counts.append(" sessions   ", style=COLOR_MUTED)
     counts.append(f"{sum(s.proc_count for s in sessions)}", style=f"bold {COLOR_TEXT}")
