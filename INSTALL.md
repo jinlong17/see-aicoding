@@ -30,7 +30,7 @@ This repo isn't on GitHub yet. Once it is, every other machine just needs the on
 ### Path A — using GitHub web UI (no extra tools needed)
 
 1. Go to https://github.com/new
-2. Name it `see-aicoding`, public, no README/license (we already have those)
+2. Name it `see-aicoding`, public, no README (we already have one)
 3. Run on your local machine:
 
     ```bash

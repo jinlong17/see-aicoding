@@ -169,7 +169,3 @@ git push -u origin main
 # On any other machine:
 pip install --user git+https://github.com/jinlong17/see-aicoding.git
 ```
-
-## License
-
-MIT — see [LICENSE](LICENSE).
