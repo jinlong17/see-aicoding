@@ -28,7 +28,8 @@ Track Claude Code, Codex, OpenAI extensions, Cursor, child processes, CPU, memor
 │                                             Local storage 436G/460G       │
 ╰─────────────────────────────── AI workload with system context ───────────╯
 ╭─ ◆ Claude ─────────────╮╭─ ◆ Codex / OpenAI ───╮╭─ ◆ Cursor IDE ──────────╮
-│ ▱▱▱▱▱▱▱▱ 26.1%          ││ ▰▰▱▱▱▱▱▱ 94.4%        ││ ▰▱▱▱▱▱▱▱ 52.2%          │
+│ Processor   14 sessions││ Processor  6 sessions││ Processor    2 sessions│
+│ ███░ 26% capacity    ││ ███████░ 94% capacity││ █████░ 52% capacity  │
 │ Memory 817.6MB         ││ Memory 1.3GB          ││ Memory 1.1GB            │
 │ Projects               ││ Projects              ││ Projects                │
 │   ◆ Any2K        9p    ││   ◆ see-aicoding 8p   ││   ◆ Any2K        42p    │
