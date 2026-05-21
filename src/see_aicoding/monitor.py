@@ -56,24 +56,24 @@ ZONE_OF: dict[str, str] = {
 
 # Display label + base color per kind.
 KIND_META: dict[str, tuple[str, str]] = {
-    KIND_CLAUDE_CLI: ("Claude CLI", "magenta"),
-    KIND_CLAUDE_CURSOR: ("Claude in Cursor", "bright_magenta"),
-    KIND_CODEX_DESKTOP: ("Codex Desktop", "green"),
-    KIND_CODEX_CLI: ("Codex CLI", "bright_green"),
-    KIND_OPENAI_CURSOR: ("OpenAI/Codex in Cursor", "spring_green2"),
-    KIND_OTHER_AI_CURSOR: ("Other AI in Cursor", "yellow"),
-    KIND_CURSOR_IDE: ("Cursor IDE", "cyan"),
-    KIND_MCP: ("MCP", "grey50"),
-    KIND_CHILD: ("child", "grey42"),
-    KIND_OTHER: ("other", "grey30"),
+    KIND_CLAUDE_CLI: ("Claude CLI", "#c084fc"),
+    KIND_CLAUDE_CURSOR: ("Claude in Cursor", "#d946ef"),
+    KIND_CODEX_DESKTOP: ("Codex Desktop", "#34d399"),
+    KIND_CODEX_CLI: ("Codex CLI", "#86efac"),
+    KIND_OPENAI_CURSOR: ("OpenAI/Codex in Cursor", "#2dd4bf"),
+    KIND_OTHER_AI_CURSOR: ("Other AI in Cursor", "#facc15"),
+    KIND_CURSOR_IDE: ("Cursor IDE", "#38bdf8"),
+    KIND_MCP: ("MCP", "#94a3b8"),
+    KIND_CHILD: ("child", "#64748b"),
+    KIND_OTHER: ("other", "#475569"),
 }
 
 # Zone-level metadata for header / panels.
 ZONE_META: dict[str, tuple[str, str, str]] = {
     # zone_id: (title, color, emoji)
-    ZONE_CLAUDE: ("Claude", "magenta", "🅒"),
-    ZONE_CODEX: ("Codex / OpenAI", "green", "🅞"),
-    ZONE_CURSOR: ("Cursor IDE", "cyan", "🅒"),
+    ZONE_CLAUDE: ("Claude", "#c084fc", "◆"),
+    ZONE_CODEX: ("Codex / OpenAI", "#34d399", "◆"),
+    ZONE_CURSOR: ("Cursor IDE", "#38bdf8", "◆"),
 }
 
 
@@ -116,6 +116,8 @@ PATTERNS_MCP = (
 def classify(p: "ProcSample") -> str:
     """Order matters: most specific first."""
     hay = p.cmdline_str or p.exe or p.name
+    if "chrome_crashpad_handler" in hay:
+        return KIND_CHILD
     for pat in PATTERNS_CLAUDE_CURSOR:
         if pat.search(hay):
             return KIND_CLAUDE_CURSOR
@@ -185,7 +187,30 @@ def derive_project(cwd: str | None) -> str:
     if not cwd or cwd == "/":
         return "—"
     p = Path(cwd)
-    if any(str(p).startswith(prefix) for prefix in ("/tmp", "/private/tmp", "/var", "/System", "/usr")):
+    home = Path.home()
+    if p == home:
+        return "—"
+    ignored_prefixes = (
+        "/tmp",
+        "/private/tmp",
+        "/var",
+        "/System",
+        "/usr",
+        "/Applications",
+    )
+    if any(str(p).startswith(prefix) for prefix in ignored_prefixes):
+        return "—"
+    ignored_home_dirs = (
+        home / ".codex" / "plugins",
+        home / ".cursor" / "extensions",
+        home / ".vscode" / "extensions",
+    )
+    if any(str(p).startswith(str(prefix)) for prefix in ignored_home_dirs):
+        return "—"
+    ignored_names = {
+        "screen_recording",
+    }
+    if p.name in ignored_names:
         return "—"
     markers = ("package.json", ".git", "Cargo.toml", "pyproject.toml", "go.mod")
     cur = p
@@ -196,7 +221,6 @@ def derive_project(cwd: str | None) -> str:
         if cur.parent == cur:
             break
         cur = cur.parent
-    home = Path.home()
     try:
         rel = p.relative_to(home)
         parts = rel.parts
@@ -205,6 +229,46 @@ def derive_project(cwd: str | None) -> str:
     except ValueError:
         pass
     return p.name or "—"
+
+
+GENERIC_PROJECT_LABELS = {
+    "—",
+    "(claude daemon)",
+    "(Codex Desktop app)",
+    "(Cursor IDE)",
+}
+
+FALLBACK_PROJECT_BY_KIND = {
+    KIND_CODEX_DESKTOP: "(Codex Desktop app)",
+    KIND_CODEX_CLI: "(Codex CLI)",
+    KIND_OPENAI_CURSOR: "(Cursor OpenAI/Codex ext)",
+    KIND_OTHER_AI_CURSOR: "(AI extension)",
+    KIND_CURSOR_IDE: "(Cursor IDE)",
+}
+
+
+CURSOR_HOST_PROJECT_RE = re.compile(
+    r"Cursor Helper \(Plugin\): extension-host \([^)]+\) (?P<project>.+?) \[\d+-\d+\]"
+)
+
+
+def is_meaningful_project(project: str) -> bool:
+    return bool(project and project not in GENERIC_PROJECT_LABELS)
+
+
+def project_from_cmdline(p: "ProcSample") -> str:
+    match = CURSOR_HOST_PROJECT_RE.search(p.cmdline_str)
+    if not match:
+        return "—"
+    project = match.group("project").strip()
+    return project or "—"
+
+
+def proc_project(p: "ProcSample") -> str:
+    project = derive_project(p.cwd)
+    if is_meaningful_project(project):
+        return project
+    return project_from_cmdline(p)
 
 
 def session_project(p: "ProcSample") -> str:
@@ -216,6 +280,47 @@ def session_project(p: "ProcSample") -> str:
     if p.kind == KIND_CURSOR_IDE and "/Cursor.app/Contents/MacOS/Cursor" in p.exe:
         return "(Cursor IDE)"
     return derive_project(p.cwd)
+
+
+@dataclass
+class ProjectSummary:
+    name: str
+    cpu: float = 0.0
+    rss: int = 0
+    proc_count: int = 0
+    latest_create_time: float = 0.0
+
+
+def infer_session_project_stats(
+    root: "ProcSample",
+    descendants: list["ProcSample"],
+) -> list[ProjectSummary]:
+    root_project = session_project(root)
+    fallback_project = root_project if is_meaningful_project(root_project) else ""
+
+    projects: dict[str, ProjectSummary] = {}
+    samples = sorted([root, *descendants], key=lambda p: -p.create_time)
+    for sample in samples:
+        project = root_project if sample.pid == root.pid else proc_project(sample)
+        if not is_meaningful_project(project) and fallback_project:
+            project = fallback_project
+        if not is_meaningful_project(project):
+            continue
+        summary = projects.setdefault(project, ProjectSummary(name=project))
+        summary.cpu += sample.cpu_percent
+        summary.rss += sample.rss
+        summary.proc_count += 1
+        summary.latest_create_time = max(summary.latest_create_time, sample.create_time)
+    return sorted(projects.values(), key=lambda p: (-p.latest_create_time, p.name))
+
+
+def summarize_session_project(root: "ProcSample", projects: list[str]) -> str:
+    root_project = session_project(root)
+    if not projects:
+        return FALLBACK_PROJECT_BY_KIND.get(root.kind, root_project)
+    if len(projects) == 1:
+        return projects[0]
+    return f"{len(projects)} projects"
 
 
 def short_proc_label(p: "ProcSample", width: int = 22) -> str:
@@ -299,6 +404,8 @@ class Session:
     kind: str
     root: ProcSample
     project: str
+    projects: list[str] = field(default_factory=list)
+    project_stats: list[ProjectSummary] = field(default_factory=list)
     descendants: list[ProcSample] = field(default_factory=list)
 
     @property
@@ -459,6 +566,11 @@ def build_sessions(procs: dict[int, ProcSample]) -> list[Session]:
         p.session_id = root.session_id
         sessions[root.pid].descendants.append(p)
 
+    for session in sessions.values():
+        session.project_stats = infer_session_project_stats(session.root, session.descendants)
+        session.projects = [p.name for p in session.project_stats]
+        session.project = summarize_session_project(session.root, session.projects)
+
     # Sort: newest first (shortest uptime on top). Keep order stable as CPU changes.
     return sorted(
         sessions.values(),
@@ -484,8 +596,38 @@ class History:
             ZONE_CODEX: deque(maxlen=maxlen),
             ZONE_CURSOR: deque(maxlen=maxlen),
         }
+        self.net_recv_per_s = 0.0
+        self.net_sent_per_s = 0.0
+        self._last_net_bytes: tuple[int, int] | None = None
+        self._last_net_time: float | None = None
+        self._prime_network()
+
+    def _prime_network(self):
+        try:
+            counters = psutil.net_io_counters()
+        except (OSError, RuntimeError):
+            return
+        self._last_net_bytes = (counters.bytes_recv, counters.bytes_sent)
+        self._last_net_time = time.time()
+
+    def _record_network(self):
+        try:
+            counters = psutil.net_io_counters()
+        except (OSError, RuntimeError):
+            return
+        now = time.time()
+        current = (counters.bytes_recv, counters.bytes_sent)
+        if self._last_net_bytes is not None and self._last_net_time is not None:
+            elapsed = max(0.001, now - self._last_net_time)
+            recv_delta = max(0, current[0] - self._last_net_bytes[0])
+            sent_delta = max(0, current[1] - self._last_net_bytes[1])
+            self.net_recv_per_s = recv_delta / elapsed
+            self.net_sent_per_s = sent_delta / elapsed
+        self._last_net_bytes = current
+        self._last_net_time = now
 
     def record(self, sessions: list[Session]):
+        self._record_network()
         live_ids: set[str] = set()
         total_cpu = 0.0
         total_mem = 0
