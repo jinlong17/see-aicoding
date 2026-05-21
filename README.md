@@ -15,13 +15,16 @@ Track Claude Code, Codex, OpenAI extensions, Cursor, child processes, CPU, memor
 ```text
 ╭─ see-aicoding ─────────────────────────────────────────────────────────────╮
 │ see-aicoding   AI coding process monitor       22 sessions   122 processes│
-│ AI CPU ▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱ 172% 21%/8c   AI MEM ▰▰▰▱▱▱▱▱▱▱ 3.1G │
-│ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁    AI RSS 3.1G    SYS MEM ▰▰▰▰▰▰▰▰▱▱ 13G/16G│
-│ Local 436G/460G 94.8%    00:02:54       NET ↓ 80K/s  ↑ 31K/s       │
-╰───────────────────────────────────────────────── system + AI workload ────╯
+│ AI processor ▰▰▰▰▰▰▱▱▱▱ 172% 21%/8 cores  AI memory ▰▰▰▱▱ 3.1G │
+│ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁    AI memory total 3.1G   processor share 21%│
+│                                           System processor ▰▰▰▱ 37%│
+│                                           System memory 13G/16G 84%│
+│                                           Local storage 436G/460G  │
+│                                           Network download 80K/s   │
+╰─────────────────────────────── AI workload with system context ───────────╯
 ╭─ ◆ Claude ─────────────╮╭─ ◆ Codex / OpenAI ────╮╭─ ◆ Cursor IDE ─────────╮
-│ ▱▱▱▱▱▱▱▱  26.1% 14 sess ││ ▰▰▱▱▱▱▱▱  94.4% 6 sess││ ▰▱▱▱▱▱▱▱  52.2% 2 sess│
-│ Projects      P CPU Mem││ Projects      P CPU Mem││ Projects      P CPU Mem│
+│ ▱▱▱▱▱▱▱▱ 26.1% 14 sessions││ ▰▰▱▱▱▱▱▱ 94.4% 6 sessions││ ▰▱▱▱▱▱▱▱ 52.2% 2 sessions│
+│ Projects Processes CPU Memory││ Projects Processes CPU Memory││ Projects Processes CPU Memory│
 │   ◆ Any2K   9p 2.1% 90M││   ◆ see      8p 18% 240M││   ◆ Any2K  42p 29% 1.2G│
 │   ◆ XAI     5p 0.8% 62M││   ◆ XAI      4p 1.4% 80M││   ◆ XAI    10p 3.0% 170M│
 │ ● XAI_Desktop · CLI    ││ ● 3 projects · Desktop││ ● 2 projects · Cursor │
@@ -141,7 +144,7 @@ Sampling flow:
 
 ## Notes
 
-- macOS RSS includes shared library pages, so Electron/V8 memory can read higher than private working set.
+- macOS resident memory includes shared library pages, so Electron/V8 memory can read higher than private working set.
 - Network speed is sampled from OS network counters, so it shows current machine traffic, not per-AI-process traffic.
 - Pure extension API activity cannot always be separated from the Cursor Extension Host process.
 - Network activity is treated as a lightweight live/idle signal; reverse-DNS attribution is intentionally avoided.
