@@ -2,11 +2,15 @@
 
 <div align="center">
 
-**A live terminal monitor for AI coding processes.**
+**A focused terminal dashboard for AI coding processes.**
 
-Track Claude Code, Codex, OpenAI extensions, Cursor, child processes, CPU, memory, uptime, and project attribution from one compact TUI.
+Track Claude Code, Codex, OpenAI extensions, Cursor, child processes, CPU, memory, uptime, project attribution, local storage, and network throughput from one compact TUI.
 
 `pip install --user git+https://github.com/jinlong17/see-aicoding.git`
+
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB?style=flat-square)](https://www.python.org/)
+[![Console TUI](https://img.shields.io/badge/interface-terminal-2f3340?style=flat-square)](#usage)
+[![macOS / Linux](https://img.shields.io/badge/os-macOS%20%2F%20Linux-3ddc97?style=flat-square)](#install)
 
 </div>
 
@@ -14,43 +18,57 @@ Track Claude Code, Codex, OpenAI extensions, Cursor, child processes, CPU, memor
 
 ```text
 ╭─ see-aicoding ─────────────────────────────────────────────────────────────╮
-│ Time 12:34:56   Network download 80K/s   upload 31K/s  AI total 22 sessions 122 processes│
-│ AI processor ▰▰▰▰▰▰▱▱▱▱ 172% 21%/8 cores  AI memory ▰▰▰▱▱ 3.1G │
-│ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁    AI memory total 3.1G   processor share 21%│
-│                                           System processor ▰▰▰▱ 37%│
-│                                           System memory 13G/16G 84%│
-│                                           Local storage 436G/460G  │
+│ Time 12:34:56   Network download 80K/s   upload 31K/s                    │
+│                         AI total 22 sessions   122 processes             │
+│                                             lijinlong@MacBook  macOS 26.4 │
+│ AI processor ▰▰▰▰▰▰▱▱▱▱ 172% 21%/8 cores   AI memory ▰▰▰▱▱ 3.1G          │
+│ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁    AI memory total 3.1G   processor share 21%       │
+│                                             System processor ▰▰▰▱ 37%     │
+│                                             System memory 13G/16G 84%     │
+│                                             Local storage 436G/460G       │
 ╰─────────────────────────────── AI workload with system context ───────────╯
-╭─ ◆ Claude ─────────────╮╭─ ◆ Codex / OpenAI ────╮╭─ ◆ Cursor IDE ─────────╮
-│ ▱▱▱▱▱▱▱▱ 26.1% 14 sessions││ ▰▰▱▱▱▱▱▱ 94.4% 6 sessions││ ▰▱▱▱▱▱▱▱ 52.2% 2 sessions│
-│ Projects Processes CPU Memory││ Projects Processes CPU Memory││ Projects Processes CPU Memory│
-│   ◆ Any2K   9p 2.1% 90M││   ◆ see      8p 18% 240M││   ◆ Any2K  42p 29% 1.2G│
-│   ◆ XAI     5p 0.8% 62M││   ◆ XAI      4p 1.4% 80M││   ◆ XAI    10p 3.0% 170M│
-│ ● XAI_Desktop · CLI    ││ ● 3 projects · Desktop││ ● 2 projects · Cursor │
-│ ● Any2K · Claude       ││   ◆ see-aicoding 8p   ││   ◆ Any2K 42p         │
-│ ● repo · Claude        ││   ◆ XAI_Desktop 4p    ││   ◆ XAI_Desktop 9p    │
-╰────────────────────────╯╰───────────────────────╯╰───────────────────────╯
+╭─ ◆ Claude ─────────────╮╭─ ◆ Codex / OpenAI ───╮╭─ ◆ Cursor IDE ──────────╮
+│ ▱▱▱▱▱▱▱▱ 26.1%          ││ ▰▰▱▱▱▱▱▱ 94.4%        ││ ▰▱▱▱▱▱▱▱ 52.2%          │
+│ Memory 817.6MB         ││ Memory 1.3GB          ││ Memory 1.1GB            │
+│ Projects               ││ Projects              ││ Projects                │
+│   ◆ Any2K        9p    ││   ◆ see-aicoding 8p   ││   ◆ Any2K        42p    │
+│   ◆ XAI_Desktop  5p    ││   ◆ XAI_Desktop 4p    ││   ◆ XAI_Desktop  10p    │
+╰────────────────────────╯╰──────────────────────╯╰────────────────────────╯
 ```
 
-## What It Answers
+## Why Use It
+
+When several AI coding tools are open at once, the expensive process is often hidden behind Electron helpers, extension hosts, or child processes. `see-aicoding` groups that noise into readable sessions so you can quickly answer:
 
 | Question | Where to look |
 |---|---|
-| Which AI tool is using CPU? | Zone totals and `CPU%` rows |
-| Which projects are active? | Zone `Projects` rows and colored per-session project rows |
-| Is it a root process or helper? | Tree rows under each session |
-| Is it just idle noise? | `Status` column: `HOT`, `LIVE`, `WARM`, `IDLE` |
-| What AI extensions are installed? | Cursor zone extension inventory |
+| Which AI tool is using the most processor time? | Zone totals and `CPU%` rows |
+| Which project is active? | `Projects` rows in each zone and session |
+| Is the activity from a root process or helper? | Tree rows under each session |
+| Is a session actually doing work? | `Status`: `HOT`, `LIVE`, `WARM`, or `IDLE` |
+| Which AI extensions are installed? | Cursor zone extension inventory |
+| Is the whole machine under pressure? | Top-right system processor, memory, storage, and network rows |
+
+## Features
+
+| Area | What you get |
+|---|---|
+| AI process grouping | Claude Code, Codex Desktop, Codex CLI, Cursor, OpenAI extensions, and common helper processes |
+| Project attribution | Project names inferred from cwd, repo markers, and Cursor extension-host process names |
+| Stable ordering | Sessions sort by creation time, so rows do not jump around when CPU changes |
+| Per-project totals | Process count, processor usage, and memory per detected project |
+| System context | Time, network throughput, system processor, system memory, and local storage |
+| Extension inventory | Installed Cursor / VS Code AI extensions with version and host |
 
 ## Install
 
-From GitHub:
+Install from GitHub:
 
 ```bash
 pip install --user git+https://github.com/jinlong17/see-aicoding.git
 ```
 
-With `pipx`:
+Or with `pipx`:
 
 ```bash
 pipx install git+https://github.com/jinlong17/see-aicoding.git
@@ -137,7 +155,7 @@ Sampling flow:
 
 1. `Sampler.snapshot()` walks processes owned by the current user.
 2. `classify()` tags each process as Claude, Codex, Cursor, extension, MCP, or child.
-3. `build_sessions()` picks root processes and attributes descendants through the PPID chain.
+3. `build_sessions()` picks root processes and attributes descendants through the parent-process chain.
 4. Project names are inferred from cwd, repo markers, and selected desktop app child processes.
 5. `render_all()` draws the header, three zones, footer, sparklines, and extension inventory.
 
