@@ -4,7 +4,7 @@
 
 **A focused terminal dashboard for AI coding processes.**
 
-Track Claude Code, Codex, OpenAI extensions, Cursor, child processes, CPU, memory, uptime, project attribution, local storage, and network throughput from one compact TUI.
+Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child processes, CPU, memory, uptime, project attribution, local storage, and network throughput from one compact TUI.
 
 `pip install --user git+https://github.com/jinlong17/see-aicoding.git`
 
@@ -54,7 +54,7 @@ When several AI coding tools are open at once, the expensive process is often hi
 
 | Area | What you get |
 |---|---|
-| AI process grouping | Claude Code, Codex Desktop, Codex CLI, Cursor, OpenAI extensions, and common helper processes |
+| AI process grouping | Claude Code, Claude Desktop, Codex Desktop, Codex CLI, Cursor, OpenAI extensions, and common helper processes |
 | Project attribution | Project names inferred from cwd, repo markers, and Cursor extension-host process names |
 | Stable ordering | Sessions sort by creation time, so rows do not jump around when CPU changes |
 | Per-project totals | Process count, processor usage, and memory per detected project |
@@ -117,6 +117,7 @@ see-aicoding --full-screen    # alternate-screen mode
 | Tool family | Detection signal |
 |---|---|
 | Claude Code CLI | `~/.local/share/claude/versions/`, `@anthropic-ai/claude-code` |
+| Claude Desktop | `/Applications/Claude.app/` and helper process tree |
 | Claude in Cursor / VS Code | `anthropic.claude-code-*` extension paths |
 | Codex Desktop | `/Applications/Codex.app/` and helper process tree |
 | Codex CLI | `@openai/codex`, `~/.codex/`, `codex` executable paths |
