@@ -8,6 +8,7 @@ Layout:
 """
 from __future__ import annotations
 
+import shutil
 import time
 
 import psutil
@@ -20,7 +21,6 @@ from rich.text import Text
 from .cursor_ext import ExtensionInfo, group_by_family
 from .monitor import (
     KIND_META,
-    ROOT_KINDS,
     ZONE_CLAUDE,
     ZONE_CODEX,
     ZONE_CURSOR,
@@ -59,6 +59,11 @@ def mem_color(rss: int) -> str:
     return "grey42"
 
 
+def compact_size(n: int) -> str:
+    """Short byte label for dense header cells."""
+    return fmt_bytes(n).replace(".0", "")
+
+
 # ─── Progress bar (inline, monochrome → 3-color gradient) ──────────────────
 
 BAR_FILLED = "▰"
@@ -91,7 +96,7 @@ def progress_bar(value: float, total: float, width: int = 20, color: str | None 
 # ─── Header ────────────────────────────────────────────────────────────────
 
 
-def render_header(sessions: list[Session], history: History, refresh_s: float) -> Panel:
+def render_header(sessions: list[Session], history: History, _refresh_s: float) -> Panel:
     n_cpus = psutil.cpu_count() or 1
     vm = psutil.virtual_memory()
     machine_cpu = psutil.cpu_percent(interval=None)
@@ -100,43 +105,82 @@ def render_header(sessions: list[Session], history: History, refresh_s: float) -
     total_mem = sum(s.total_rss for s in sessions)
     cpu_ratio_of_machine = (total_cpu / n_cpus) / 100.0  # 1.0 = saturating all cores
     mem_ratio = total_mem / vm.total if vm.total else 0
+    compact = shutil.get_terminal_size((120, 24)).columns < 110
+    bar_width = 8 if compact else 14
 
     body = Table.grid(expand=True, padding=(0, 1))
-    body.add_column(width=14, no_wrap=True)
-    body.add_column(width=24, no_wrap=True)
-    body.add_column(ratio=1)
-    body.add_column(width=20, no_wrap=True)
+    body.add_column(ratio=5, no_wrap=True)
+    body.add_column(ratio=5, no_wrap=True)
+    body.add_column(ratio=4, no_wrap=True)
 
-    # Row: AI CPU
-    body.add_row(
-        Text("AI CPU", style="bold"),
-        progress_bar(cpu_ratio_of_machine, 1.0, width=22),
-        Text(f"{total_cpu:6.1f}%  ({cpu_ratio_of_machine * 100:4.1f}% of {n_cpus} cores)",
-             style=cpu_color(cpu_ratio_of_machine * 100)),
-        Text(f"machine CPU {machine_cpu:5.1f}%", style=cpu_color(machine_cpu)),
+    cpu = Text()
+    cpu.append("AI CPU ", style="bold bright_white")
+    cpu.append_text(progress_bar(cpu_ratio_of_machine, 1.0, width=bar_width))
+    cpu.append(
+        f" {total_cpu:.0f}% " if compact else f" {total_cpu:5.1f}% ",
+        style=cpu_color(cpu_ratio_of_machine * 100),
+    )
+    cpu_share = (
+        f"{cpu_ratio_of_machine * 100:.0f}%/{n_cpus}c"
+        if compact
+        else f"{cpu_ratio_of_machine * 100:4.1f}%/{n_cpus} cores"
+    )
+    cpu.append(cpu_share, style="grey50")
+
+    mem = Text()
+    mem.append("AI MEM ", style="bold bright_white")
+    mem.append_text(progress_bar(mem_ratio, 1.0, width=bar_width))
+    mem.append(f" {compact_size(total_mem)}", style=mem_color(total_mem))
+    mem_limit = (
+        f"/{compact_size(vm.total)}"
+        if compact
+        else f"  {mem_ratio * 100:4.1f}% of {fmt_bytes(vm.total)}"
+    )
+    mem.append(mem_limit, style="grey50")
+
+    machine = Text()
+    machine.append("SYS " if compact else "Machine ", style="bold grey70")
+    machine_cpu_label = (
+        f"CPU {machine_cpu:.0f}% " if compact else f"CPU {machine_cpu:4.1f}% "
+    )
+    machine_mem_label = (
+        f"MEM {vm.percent:.0f}%" if compact else f"MEM {vm.percent:4.1f}%"
+    )
+    machine.append(machine_cpu_label, style=cpu_color(machine_cpu))
+    machine.append(machine_mem_label, style=cpu_color(vm.percent))
+
+    spark = (
+        sparkline(history.total_cpu, scale_max=max(100.0, max(history.total_cpu)))
+        if history.total_cpu
+        else ""
+    )
+    trend = Text()
+    trend.append("Trend ", style="grey50")
+    trend.append(spark or "collecting", style="bright_cyan" if spark else "grey42")
+
+    counts = Text()
+    counts.append(f"{len(sessions)}", style="bold white")
+    counts.append(" sess   " if compact else " sessions   ", style="grey50")
+    counts.append(f"{sum(s.proc_count for s in sessions)}", style="bold white")
+    counts.append(" proc" if compact else " processes", style="grey50")
+
+    now = Text(
+        time.strftime("%H:%M:%S" if compact else "%Y-%m-%d %H:%M:%S"),
+        style="bright_white",
     )
 
-    # Row: AI MEM
-    body.add_row(
-        Text("AI MEM", style="bold"),
-        progress_bar(mem_ratio, 1.0, width=22),
-        Text(f"{fmt_bytes(total_mem)}  /  {fmt_bytes(vm.total)}  ({mem_ratio * 100:4.1f}%)",
-             style=mem_color(total_mem)),
-        Text(f"machine MEM {vm.percent:5.1f}%", style=cpu_color(vm.percent)),
+    body.add_row(cpu, mem, machine)
+    body.add_row(trend, counts, now)
+
+    return Panel(
+        body,
+        title="[bold bright_blue] see-aicoding [/]",
+        subtitle="[grey50]AI coding process monitor[/]",
+        title_align="left",
+        subtitle_align="right",
+        border_style="bright_blue",
+        padding=(0, 1),
     )
-
-    # Row: trend sparkline (full machine AI total CPU).
-    if history.total_cpu:
-        spark = sparkline(history.total_cpu, scale_max=max(100.0, max(history.total_cpu)))
-        body.add_row(
-            Text("Trend", style="grey50"),
-            Text(spark, style="bright_cyan"),
-            Text(f"{len(sessions)} sessions   {sum(s.proc_count for s in sessions)} processes", style="white"),
-            Text(time.strftime("%Y-%m-%d %H:%M:%S"), style="bright_white"),
-        )
-
-    return Panel(body, title="[bold]see-aicoding[/]   [grey50]AI coding process monitor[/]",
-                 border_style="bright_blue", padding=(0, 1))
 
 
 # ─── Zone panel ────────────────────────────────────────────────────────────
@@ -234,7 +278,8 @@ def render_zone(
         )
 
         if show_tree and s.descendants:
-            kids = sorted(s.descendants, key=lambda d: -d.cpu_percent)[:5]
+            descendants = sorted(s.descendants, key=lambda d: -d.create_time)
+            kids = descendants[:5]
             for i, d in enumerate(kids):
                 last = (i == len(kids) - 1) and (len(s.descendants) <= 5)
                 prefix = "  └─ " if last else "  ├─ "
@@ -251,8 +296,8 @@ def render_zone(
                 )
             if len(s.descendants) > 5:
                 more = len(s.descendants) - 5
-                more_cpu = sum(d.cpu_percent for d in s.descendants[5:])
-                more_mem = sum(d.rss for d in s.descendants[5:])
+                more_cpu = sum(d.cpu_percent for d in descendants[5:])
+                more_mem = sum(d.rss for d in descendants[5:])
                 tbl.add_row(
                     Text(f"  └─ +{more} more", style="grey42"),
                     Text(f"{more_cpu:5.1f}", style="grey50"),
@@ -273,6 +318,7 @@ def render_zone(
     return Panel(
         Group(header, *extras),
         title=title,
+        title_align="left",
         border_style=color,
         padding=(0, 1),
     )
@@ -353,7 +399,7 @@ def render_all(
     """Build the full layout: header + 3 zones + footer."""
     layout = Layout()
     layout.split_column(
-        Layout(name="header", size=7),
+        Layout(name="header", size=4),
         Layout(name="body", ratio=1),
         Layout(name="footer", size=1),
     )

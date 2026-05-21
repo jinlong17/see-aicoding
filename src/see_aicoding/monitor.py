@@ -256,8 +256,12 @@ def short_proc_label(p: "ProcSample", width: int = 22) -> str:
 def count_remote_conns(pid: int) -> int:
     """Established outbound connections — cheap activity proxy."""
     try:
-        conns = psutil.Process(pid).net_connections(kind="inet")
-    except (psutil.NoSuchProcess, psutil.AccessDenied, RuntimeError):
+        proc = psutil.Process(pid)
+        if hasattr(proc, "net_connections"):
+            conns = proc.net_connections(kind="inet")
+        else:
+            conns = proc.connections(kind="inet")
+    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError, RuntimeError):
         return 0
     n = 0
     for c in conns:
@@ -350,18 +354,15 @@ class Sampler:
     def snapshot(self) -> dict[int, ProcSample]:
         out: dict[int, ProcSample] = {}
         alive: set[int] = set()
-        username = os.environ.get("USER", "")
-        for proc in psutil.process_iter(["pid"]):
+        username = os.environ.get("USER") or None
+        for proc in psutil.process_iter(["pid", "username"]):
             try:
                 pid = proc.info["pid"]
+                if username is not None and proc.info.get("username") != username:
+                    continue
                 alive.add(pid)
                 p = self._get(pid)
                 if p is None:
-                    continue
-                try:
-                    if p.username() != username:
-                        continue
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
                 with p.oneshot():
                     try:
@@ -458,10 +459,10 @@ def build_sessions(procs: dict[int, ProcSample]) -> list[Session]:
         p.session_id = root.session_id
         sessions[root.pid].descendants.append(p)
 
-    # Sort: newest first (shortest uptime on top), then by CPU desc.
+    # Sort: newest first (shortest uptime on top). Keep order stable as CPU changes.
     return sorted(
         sessions.values(),
-        key=lambda s: (-s.root.create_time, -s.total_cpu),
+        key=lambda s: -s.root.create_time,
     )
 
 

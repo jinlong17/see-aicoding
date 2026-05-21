@@ -4,13 +4,13 @@ Live system-wide monitor for **Claude Code**, **Codex**, and **Cursor** AI codin
 
 Built for the common case: **you run multiple AI coding sessions across several projects at once** and want to know which one is eating your CPU / RAM.
 
-![preview](docs/preview.txt)
+Preview:
 
 ```
-┌─ see-aicoding   AI coding process monitor ───────────────────────────┐
-│ AI CPU  ▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱  243.2%  (30.4% of 8 cores)  CPU 94%   │
-│ AI MEM  ▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  3.0GB / 16.0GB  (18.9%)     MEM 85%   │
-│ Trend   ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁▂▃▄▅▆  31 sessions  169 processes            │
+┌─ see-aicoding ────────────────────────────────────────────────────────┐
+│ AI CPU ▰▰▰▰▱▱▱▱▱▱▱▱▱▱ 243.2% 30.4%/8 cores  AI MEM ▰▰▰▱ 3.0GB 18.9% │
+│ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁▂▃▄▅▆     31 sessions  169 processes  12:34:56 │
+└────────────────────────────────────── AI coding process monitor ──────┘
 ├─ 🅒 Claude ──────────┬─ 🅞 Codex / OpenAI ──┬─ 🅒 Cursor IDE ───────┤
 │ ▰▰▰▱▱▱▱▱▱▱  47%      │ ▰▰▰▰▰▰▰▰▱▱  145%     │ ▰▰▱▱▱▱▱▱▱▱  25%       │
 │ 14 sessions          │ 5 sessions           │ 1 session             │
@@ -105,7 +105,7 @@ see-aicoding --full-screen    # alternate-screen mode (no scrollback)
 - **Cursor IDE zone** — Cursor application itself + a list of installed AI extensions (whether running or not).
 
 Within each zone:
-- Sessions are sorted **newest first** (shortest uptime on top). Stable order — list does not reshuffle as CPU% fluctuates.
+- Sessions and child processes are sorted **newest first** (shortest uptime on top). CPU changes do not reshuffle rows.
 - CPU% / memory rows are color-graded: gray (< 5%) → green → yellow → red.
 - Status badge: 🔴 high-load (≥70%), 🟢 live (≥10% or has remote conn), 🟡 lite (≥1%), ⚪ idle.
 - Idle sessions (< 0.5% CPU) are hidden by default — use `-a` to show.
