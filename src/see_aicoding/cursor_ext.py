@@ -15,16 +15,16 @@ from pathlib import Path
 # Each entry: ext_id_prefix → (display_name, family, color)
 # Family used for visual grouping: claude / openai / copilot / cline / continue / cody / other
 KNOWN_AI_EXTENSIONS: dict[str, tuple[str, str, str]] = {
-    "anthropic.claude-code": ("Claude Code", "claude", "magenta"),
-    "openai.chatgpt": ("OpenAI ChatGPT", "openai", "green"),
-    "openai.codex": ("OpenAI Codex", "openai", "green"),
-    "github.copilot": ("GitHub Copilot", "copilot", "bright_blue"),
-    "github.copilot-chat": ("Copilot Chat", "copilot", "bright_blue"),
-    "saoudrizwan.claude-dev": ("Cline (Claude Dev)", "cline", "bright_yellow"),
-    "continue.continue": ("Continue", "continue", "yellow"),
-    "sourcegraph.cody-ai": ("Cody", "cody", "bright_red"),
-    "tabnine.tabnine-vscode": ("Tabnine", "tabnine", "grey70"),
-    "codeium.codeium": ("Codeium", "codeium", "bright_cyan"),
+    "anthropic.claude-code": ("Claude Code", "claude", "#B48CFF"),
+    "openai.chatgpt": ("OpenAI ChatGPT", "openai", "#30D5A8"),
+    "openai.codex": ("OpenAI Codex", "openai", "#30D5A8"),
+    "github.copilot": ("GitHub Copilot", "copilot", "#8FB4FF"),
+    "github.copilot-chat": ("Copilot Chat", "copilot", "#8FB4FF"),
+    "saoudrizwan.claude-dev": ("Cline (Claude Dev)", "cline", "#D6B6FF"),
+    "continue.continue": ("Continue", "continue", "#F0C987"),
+    "sourcegraph.cody-ai": ("Cody", "cody", "#F2A0A8"),
+    "tabnine.tabnine-vscode": ("Tabnine", "tabnine", "#A1ACB8"),
+    "codeium.codeium": ("Codeium", "codeium", "#9AD8C9"),
 }
 
 

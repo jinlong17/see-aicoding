@@ -56,24 +56,24 @@ ZONE_OF: dict[str, str] = {
 
 # Display label + base color per kind.
 KIND_META: dict[str, tuple[str, str]] = {
-    KIND_CLAUDE_CLI: ("Claude CLI", "#c084fc"),
-    KIND_CLAUDE_CURSOR: ("Claude in Cursor", "#d946ef"),
-    KIND_CODEX_DESKTOP: ("Codex Desktop", "#34d399"),
-    KIND_CODEX_CLI: ("Codex CLI", "#86efac"),
-    KIND_OPENAI_CURSOR: ("OpenAI/Codex in Cursor", "#2dd4bf"),
-    KIND_OTHER_AI_CURSOR: ("Other AI in Cursor", "#facc15"),
-    KIND_CURSOR_IDE: ("Cursor IDE", "#38bdf8"),
-    KIND_MCP: ("MCP", "#94a3b8"),
-    KIND_CHILD: ("child", "#64748b"),
-    KIND_OTHER: ("other", "#475569"),
+    KIND_CLAUDE_CLI: ("Claude CLI", "#B48CFF"),
+    KIND_CLAUDE_CURSOR: ("Claude in Cursor", "#B48CFF"),
+    KIND_CODEX_DESKTOP: ("Codex Desktop", "#30D5A8"),
+    KIND_CODEX_CLI: ("Codex CLI", "#30D5A8"),
+    KIND_OPENAI_CURSOR: ("OpenAI/Codex in Cursor", "#30D5A8"),
+    KIND_OTHER_AI_CURSOR: ("Other AI in Cursor", "#43BFF2"),
+    KIND_CURSOR_IDE: ("Cursor IDE", "#43BFF2"),
+    KIND_MCP: ("MCP", "#A1ACB8"),
+    KIND_CHILD: ("child", "#667382"),
+    KIND_OTHER: ("other", "#667382"),
 }
 
 # Zone-level metadata for header / panels.
 ZONE_META: dict[str, tuple[str, str, str]] = {
     # zone_id: (title, color, emoji)
-    ZONE_CLAUDE: ("Claude", "#c084fc", "◆"),
-    ZONE_CODEX: ("Codex / OpenAI", "#34d399", "◆"),
-    ZONE_CURSOR: ("Cursor IDE", "#38bdf8", "◆"),
+    ZONE_CLAUDE: ("Claude", "#B48CFF", "◆"),
+    ZONE_CODEX: ("Codex / OpenAI", "#30D5A8", "◆"),
+    ZONE_CURSOR: ("Cursor IDE", "#43BFF2", "◆"),
 }
 
 

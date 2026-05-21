@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
             elapsed = time.time() - t0
             time.sleep(max(0.05, refresh - elapsed))
 
-    console.print("[grey50]bye.[/]")
+    console.print("[#667382]bye.[/]")
     return 0
 
 

@@ -43,29 +43,26 @@ from .monitor import (
 
 # ─── Color helpers ─────────────────────────────────────────────────────────
 
-COLOR_HOT = "#ff6b8a"
-COLOR_WARN = "#f2c94c"
-COLOR_OK = "#3ddc97"
-COLOR_COOL = "#43c6e8"
-COLOR_ACCENT = "#7aa2ff"
-COLOR_TEXT = "#edf2f7"
-COLOR_MUTED = "#9aa8bd"
-COLOR_DIM = "#5f6f86"
-COLOR_PANEL = "#3b4a60"
-COLOR_EMPTY = "#172033"
-COLOR_TRACK = "#263247"
-TABLE_HEADER_STYLE = f"bold {COLOR_TEXT} on #202b3d"
+COLOR_HOT = "#FF5C7A"
+COLOR_WARN = "#FFD166"
+COLOR_OK = "#32D583"
+COLOR_COOL = "#43BFF2"
+COLOR_ACCENT = "#3A4655"
+COLOR_TEXT = "#E8EDF2"
+COLOR_MUTED = "#A1ACB8"
+COLOR_DIM = "#667382"
+COLOR_PANEL = "#2A3442"
+COLOR_EMPTY = "#101722"
+COLOR_TRACK = "#101722"
+COLOR_TREE = "#3A4655"
+TABLE_HEADER_STYLE = f"bold {COLOR_TEXT} on #17202B"
 PROJECT_PALETTE = (
-    "#b8a1ff",
-    "#55d6f2",
-    "#63e6be",
-    "#ffd166",
-    "#ff8fab",
-    "#8ab4ff",
-    "#f7a8d8",
-    "#6ee7e0",
-    "#d8b4fe",
-    "#ffb86b",
+    "#8FB4FF",
+    "#9AD8C9",
+    "#D6B6FF",
+    "#F0C987",
+    "#F2A0A8",
+    "#A7C7A1",
 )
 MAX_CHILD_ROWS = 12
 MAX_PROJECT_CHILD_ROWS = 5
@@ -147,9 +144,9 @@ def aggregate_project_stats(sessions: list[Session]) -> list[ProjectSummary]:
     return sorted(grouped.values(), key=lambda p: (-p.latest_create_time, p.name))
 
 
-def project_name_text(project: str, prefix: str = "◆ ") -> Text:
+def project_name_text(project: str, prefix: str = "◆ ", name_style: str = COLOR_TEXT) -> Text:
     txt = Text(prefix, style=project_color(project))
-    txt.append(project, style=project_color(project))
+    txt.append(project, style=name_style)
     return txt
 
 
@@ -204,7 +201,7 @@ def progress_bar(
     if ratio > 0 and min_filled > 0:
         filled = min(width, max(min_filled, filled))
     if color is None:
-        # Default: green→yellow→red gradient by ratio.
+        # Default: quiet-to-hot load ramp by ratio.
         if ratio >= 0.7:
             color = COLOR_HOT
         elif ratio >= 0.4:
@@ -326,7 +323,7 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
     time_network.append("   Network ", style=f"bold {COLOR_MUTED}")
     time_network.append("download ", style=COLOR_COOL)
     time_network.append(compact_rate(history.net_recv_per_s), style=COLOR_TEXT)
-    time_network.append("   upload ", style=COLOR_OK)
+    time_network.append("   upload ", style=COLOR_COOL)
     time_network.append(compact_rate(history.net_sent_per_s), style=COLOR_TEXT)
 
     body.add_row(time_network, counts, system_identity)
@@ -430,7 +427,7 @@ def render_zone(
         tbl.add_row(Text(msg, style=COLOR_MUTED), "", "", "", "")
 
     for s in visible:
-        label, sk_color = KIND_META.get(s.kind, (s.kind, "white"))
+        label, sk_color = KIND_META.get(s.kind, (s.kind, COLOR_MUTED))
         # Session label = tool + project.
         sess_label = Text()
         sess_label.append("● ", style=sk_color)
@@ -463,7 +460,7 @@ def render_zone(
         if s.project_stats:
             for project in s.project_stats:
                 tbl.add_row(
-                    project_name_text(project.name, prefix="  ◆ "),
+                    project_name_text(project.name, prefix="  ◆ ", name_style=COLOR_MUTED),
                     Text(f"{project.cpu:5.1f}", style=cpu_color(project.cpu)),
                     Text(fmt_bytes(project.rss), style=mem_color(project.rss)),
                     Text(f"{project.proc_count}p", style=COLOR_MUTED),
@@ -475,10 +472,9 @@ def render_zone(
                     for i, d in enumerate(shown_children):
                         last = i == len(shown_children) - 1 and len(children) <= MAX_PROJECT_CHILD_ROWS
                         prefix = "    └─ " if last else "    ├─ "
-                        _, kind_color = KIND_META.get(d.kind, (d.kind, COLOR_MUTED))
                         row_label = Text()
-                        row_label.append(prefix, style=COLOR_DIM)
-                        row_label.append(short_proc_label(d), style=kind_color)
+                        row_label.append(prefix, style=COLOR_TREE)
+                        row_label.append(short_proc_label(d), style=COLOR_MUTED)
                         tbl.add_row(
                             row_label,
                             Text(f"{d.cpu_percent:5.1f}", style=cpu_color(d.cpu_percent)),
@@ -503,10 +499,9 @@ def render_zone(
             for i, d in enumerate(kids):
                 last = (i == len(kids) - 1) and (len(s.descendants) <= MAX_CHILD_ROWS)
                 prefix = "  └─ " if last else "  ├─ "
-                _, kind_color = KIND_META.get(d.kind, (d.kind, "grey50"))
                 row_label = Text()
-                row_label.append(prefix, style=COLOR_DIM)
-                row_label.append(short_proc_label(d), style=kind_color)
+                row_label.append(prefix, style=COLOR_TREE)
+                row_label.append(short_proc_label(d), style=COLOR_MUTED)
                 tbl.add_row(
                     row_label,
                     Text(f"{d.cpu_percent:5.1f}", style=cpu_color(d.cpu_percent)),
@@ -532,10 +527,9 @@ def render_zone(
             for i, d in enumerate(helpers):
                 last = i == len(helpers) - 1 and len(helper_children) <= remaining_slots
                 prefix = "    └─ " if last else "    ├─ "
-                _, kind_color = KIND_META.get(d.kind, (d.kind, COLOR_MUTED))
                 row_label = Text()
-                row_label.append(prefix, style=COLOR_DIM)
-                row_label.append(short_proc_label(d), style=kind_color)
+                row_label.append(prefix, style=COLOR_TREE)
+                row_label.append(short_proc_label(d), style=COLOR_MUTED)
                 tbl.add_row(
                     row_label,
                     Text(f"{d.cpu_percent:5.1f}", style=cpu_color(d.cpu_percent)),
@@ -600,7 +594,7 @@ def render_ext_inventory(extensions: list[ExtensionInfo]) -> Panel:
             for ext in grouped[fam]:
                 lbl = Text()
                 lbl.append("● ", style=ext.color)
-                lbl.append(ext.display_name, style="white")
+                lbl.append(ext.display_name, style=COLOR_TEXT)
                 tbl.add_row(
                     lbl,
                     Text(f"v{ext.version}" if ext.version else "—", style=COLOR_MUTED),
