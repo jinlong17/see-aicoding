@@ -66,6 +66,13 @@ PROJECT_PALETTE = (
 )
 MAX_CHILD_ROWS = 12
 MAX_PROJECT_CHILD_ROWS = 5
+IDLE_CPU_THRESHOLD = 0.5
+
+
+def visible_sessions(sessions: list[Session], hide_idle: bool) -> list[Session]:
+    if not hide_idle:
+        return sessions
+    return [s for s in sessions if s.total_cpu >= IDLE_CPU_THRESHOLD]
 
 
 def cpu_color(pct: float) -> str:
@@ -219,15 +226,16 @@ def progress_bar(
 # ─── Header ────────────────────────────────────────────────────────────────
 
 
-def render_header(sessions: list[Session], history: History, _refresh_s: float) -> Panel:
+def render_header(sessions: list[Session], history: History, _refresh_s: float, hide_idle: bool) -> Panel:
+    displayed_sessions = visible_sessions(sessions, hide_idle)
     n_cpus = psutil.cpu_count() or 1
     physical_cpus = psutil.cpu_count(logical=False) or n_cpus
     vm = psutil.virtual_memory()
     machine_cpu_pct = psutil.cpu_percent(interval=None)
     disk = local_disk_usage()
 
-    total_cpu = sum(s.total_cpu for s in sessions)
-    total_mem = sum(s.total_rss for s in sessions)
+    total_cpu = sum(s.total_cpu for s in displayed_sessions)
+    total_mem = sum(s.total_rss for s in displayed_sessions)
     cpu_ratio_of_machine = (total_cpu / n_cpus) / 100.0  # 1.0 = saturating all cores
     mem_ratio = total_mem / vm.total if vm.total else 0
     system_memory_pressure = max(0, vm.total - vm.available)
@@ -243,10 +251,10 @@ def render_header(sessions: list[Session], history: History, _refresh_s: float) 
     body.add_column(ratio=8, no_wrap=True)
 
     counts = Text()
-    counts.append("AI total ", style=f"bold {COLOR_MUTED}")
-    counts.append(f"{len(sessions)}", style=f"bold {COLOR_TEXT}")
+    counts.append("AI active " if hide_idle else "AI total ", style=f"bold {COLOR_MUTED}")
+    counts.append(f"{len(displayed_sessions)}", style=f"bold {COLOR_TEXT}")
     counts.append(" sessions   ", style=COLOR_MUTED)
-    counts.append(f"{sum(s.proc_count for s in sessions)}", style=f"bold {COLOR_TEXT}")
+    counts.append(f"{sum(s.proc_count for s in displayed_sessions)}", style=f"bold {COLOR_TEXT}")
     counts.append(" processes", style=COLOR_MUTED)
 
     system_identity = Text()
@@ -356,7 +364,8 @@ def render_zone(
     title_text, color, emoji = ZONE_META[zone_id]
     n_cpus = psutil.cpu_count() or 1
 
-    zone_sessions = [s for s in sessions if s.zone == zone_id]
+    zone_all_sessions = [s for s in sessions if s.zone == zone_id]
+    zone_sessions = visible_sessions(zone_all_sessions, hide_idle)
     zone_cpu = sum(s.total_cpu for s in zone_sessions)
     zone_mem = sum(s.total_rss for s in zone_sessions)
     zone_procs = sum(s.proc_count for s in zone_sessions)
@@ -403,9 +412,7 @@ def render_zone(
         spark = sparkline(zone_hist, scale_max=max(50.0, max(zone_hist)))
         header.add_row(Text(spark, style=color), Text("trend", style=COLOR_MUTED))
 
-    # Visible sessions (filter idle).
-    visible = zone_sessions if not hide_idle else [s for s in zone_sessions if s.total_cpu >= 0.5]
-    hidden = len(zone_sessions) - len(visible)
+    hidden = len(zone_all_sessions) - len(zone_sessions)
 
     # Sessions table.
     tbl = Table(
@@ -422,11 +429,11 @@ def render_zone(
     tbl.add_column("Age/Project", width=11, justify="right", no_wrap=True)
     tbl.add_column("Status", width=8, no_wrap=True)
 
-    if not visible:
-        msg = "(no active sessions)" if not zone_sessions else f"({hidden} idle hidden)"
+    if not zone_sessions:
+        msg = "(no active sessions)" if not zone_all_sessions else f"({hidden} idle hidden)"
         tbl.add_row(Text(msg, style=COLOR_MUTED), "", "", "", "")
 
-    for s in visible:
+    for s in zone_sessions:
         label, sk_color = KIND_META.get(s.kind, (s.kind, COLOR_MUTED))
         # Session label = tool + project.
         sess_label = Text()
@@ -648,7 +655,7 @@ def render_all(
         Layout(name="body", ratio=1),
         Layout(name="footer", size=1),
     )
-    layout["header"].update(render_header(sessions, history, refresh_s))
+    layout["header"].update(render_header(sessions, history, refresh_s, hide_idle))
     body = Layout()
     body.split_row(
         Layout(name="claude", ratio=1),
@@ -660,6 +667,6 @@ def render_all(
     body["cursor"].update(render_zone(ZONE_CURSOR, sessions, history, show_tree, hide_idle, extensions))
     layout["body"].update(body)
 
-    hidden_total = sum(1 for s in sessions if s.total_cpu < 0.5) if hide_idle else 0
+    hidden_total = len(sessions) - len(visible_sessions(sessions, hide_idle)) if hide_idle else 0
     layout["footer"].update(render_footer(refresh_s, show_tree, hide_idle, hidden_total))
     return layout
