@@ -19,7 +19,7 @@ Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child proce
 ```text
 ╭─ see-aicoding ─────────────────────────────────────────────────────────────╮
 │ Time 12:34:56   Network download 80K/s   upload 31K/s                    │
-│                         AI total 22 sessions   122 processes             │
+│                         AI active 8 sessions   96 processes              │
 │                                             lijinlong@MacBook  macOS 26.4 │
 │ AI processor ▰▰▱▱▱▱▱▱▱▱ 21% capacity (172% total)   AI memory ▰▰▰▱▱ 3.1G │
 │ Trend ▂▃▄▅▆▇█▇▆▅▄▃▂▁▁    AI memory total 3.1G   processor share 21%       │
@@ -97,7 +97,7 @@ python3 -m site --user-base
 ```bash
 see-aicoding                  # live dashboard, 1.5s refresh
 see-aicoding -i 0.5           # faster refresh
-see-aicoding --hide-idle      # show active sessions only
+see-aicoding --all            # include idle sessions
 see-aicoding --no-tree        # one row per session
 see-aicoding --once           # print one snapshot and exit
 see-aicoding --full-screen    # alternate-screen mode
@@ -106,8 +106,8 @@ see-aicoding --full-screen    # alternate-screen mode
 | Flag | Default | Effect |
 |---|---:|---|
 | `-i / --interval SECS` | `1.5` | Refresh interval, minimum 0.5s |
-| `--hide-idle` | off | Hide sessions below 0.5% CPU and switch dashboard totals to active sessions |
-| `-a / --all` | shown | Show all sessions, kept for compatibility |
+| `--hide-idle` | on | Hide sessions below 0.5% CPU; kept for compatibility because this is now the default |
+| `-a / --all` | off | Show all sessions, including idle sessions |
 | `--no-tree` | off | Hide descendant process tree |
 | `--once` | off | Render one snapshot and exit |
 | `--full-screen` | off | Use terminal alternate screen |
@@ -139,7 +139,7 @@ Ignored locations include app bundles, system directories, temporary directories
 
 Rows are sorted by creation time, newest first. CPU changes do not reshuffle rows.
 
-All sessions are shown by default. Earlier versions hid idle sessions by default, which made Claude rows appear and disappear when CPU floated around the 0.5% threshold. Use `--hide-idle` only when you intentionally want a shorter, activity-only view. In that mode, the top header switches from `AI total` to `AI active`, and each zone's session, process, processor, memory, and project totals are calculated from visible active sessions only.
+Idle sessions are hidden by default, so the top header shows `AI active` and each zone's session, process, processor, memory, and project totals are calculated from visible active sessions only. Use `--all` when you want to inspect every still-running helper or idle session. Rows remain sorted by creation time, newest first; CPU changes do not reshuffle rows.
 
 ## Architecture
 
