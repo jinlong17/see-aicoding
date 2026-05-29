@@ -201,28 +201,73 @@ def cpu_capacity(proc: ProcSample, n_cpus: int | None = None) -> float:
     return proc.cpu_percent / logical_cpus
 
 
-def resource_metric_text(proc: ProcSample, primary: str, compact: bool) -> Text:
+def resource_rank_style(rank: int) -> str:
+    if rank == 1:
+        return f"bold {COLOR_HOT}"
+    if rank == 2:
+        return f"bold {COLOR_WARN}"
+    if rank == 3:
+        return f"bold {COLOR_COOL}"
+    return COLOR_DIM
+
+
+def resource_bar(value: float, max_value: float, width: int, color: str) -> Text:
+    return progress_bar(
+        value,
+        max(max_value, 0.0001),
+        width=width,
+        color=color,
+        filled_char="━",
+        empty_char="─",
+        empty_style=COLOR_TRACK,
+        min_filled=1 if value > 0 else 0,
+    )
+
+
+def resource_watch_title(label: str, hint: str, accent: str, very_short: bool) -> Text:
     txt = Text()
-    cpu_pct = cpu_capacity(proc)
-    if primary == "mem":
-        txt.append(compact_size(proc.rss), style=mem_color(proc.rss))
-        txt.append("  ", style=COLOR_DIM)
-        txt.append(f"{cpu_pct:4.1f}%", style=cpu_color(cpu_pct))
-    else:
-        txt.append(f"{cpu_pct:4.1f}%", style=cpu_color(cpu_pct))
-        txt.append("  ", style=COLOR_DIM)
-        txt.append(compact_size(proc.rss), style=mem_color(proc.rss))
-    if not compact:
-        txt.append(f"  pid {proc.pid}", style=COLOR_DIM)
+    txt.append("● ", style=accent)
+    txt.append(label, style=f"bold {COLOR_TEXT}")
+    if not very_short:
+        txt.append(f"  {hint}", style=COLOR_DIM)
     return txt
 
 
-def resource_item_text(proc: ProcSample, rank: int, primary: str, compact: bool) -> Text:
+def resource_item_text(
+    proc: ProcSample,
+    rank: int,
+    primary: str,
+    compact: bool,
+    max_primary: float,
+    very_short: bool,
+) -> Text:
+    cpu_pct = cpu_capacity(proc)
+    name_width = 15 if compact else 24
+    bar_width = 4 if compact else 7
+    name = resource_proc_label(proc, width=name_width)
+
     txt = Text()
-    txt.append(f"{rank}. ", style=COLOR_DIM)
-    txt.append(resource_proc_label(proc, width=18 if compact else 28), style=COLOR_TEXT)
-    txt.append("  ", style=COLOR_DIM)
-    txt.append_text(resource_metric_text(proc, primary, compact))
+    txt.append(f"#{rank:<2}", style=resource_rank_style(rank))
+    txt.append(" ", style=COLOR_DIM)
+    txt.append(f"{name:<{name_width}}", style=COLOR_TEXT)
+    txt.append(" ", style=COLOR_DIM)
+
+    if primary == "mem":
+        if bar_width:
+            txt.append_text(resource_bar(float(proc.rss), max_primary, bar_width, mem_color(proc.rss)))
+            txt.append(" ", style=COLOR_DIM)
+        txt.append(f"{compact_size(proc.rss):>5}", style=mem_color(proc.rss))
+        txt.append(" ", style=COLOR_DIM)
+        txt.append(f"{cpu_pct:>4.1f}%", style=cpu_color(cpu_pct))
+    else:
+        if bar_width:
+            txt.append_text(resource_bar(cpu_pct, max_primary, bar_width, cpu_color(cpu_pct)))
+            txt.append(" ", style=COLOR_DIM)
+        txt.append(f"{cpu_pct:>4.1f}%", style=cpu_color(cpu_pct))
+        txt.append(" ", style=COLOR_DIM)
+        txt.append(f"{compact_size(proc.rss):>5}", style=mem_color(proc.rss))
+    if not compact and not very_short:
+        txt.append(f"  pid {proc.pid}", style=COLOR_DIM)
     return txt
 
 
@@ -242,27 +287,32 @@ def render_resource_watch(procs: dict[int, ProcSample]) -> Panel:
     all_procs = list(procs.values())
     top_mem = sorted(all_procs, key=lambda p: (-p.rss, -p.cpu_percent, p.pid))[:row_limit]
     top_cpu = sorted(all_procs, key=lambda p: (-cpu_capacity(p), -p.rss, p.pid))[:row_limit]
+    max_mem = float(top_mem[0].rss) if top_mem else 0.0
+    max_cpu = cpu_capacity(top_cpu[0]) if top_cpu else 0.0
 
     grid = Table.grid(expand=True, padding=(0, 2 if not compact else 1))
     grid.add_column(ratio=1)
     grid.add_column(ratio=1)
 
-    mem_title = Text("Memory Top5" if row_limit == 5 else "Memory leaders", style=f"bold {COLOR_MUTED}")
-    cpu_title = Text("CPU capacity Top5" if row_limit == 5 else "CPU cap leaders", style=f"bold {COLOR_MUTED}")
+    mem_label = "Memory Top5" if row_limit == 5 else "Memory leaders"
+    cpu_label = "CPU capacity Top5" if row_limit == 5 else "CPU cap leaders"
     if very_short:
-        mem_title = Text("Memory", style=f"bold {COLOR_MUTED}")
-        cpu_title = Text("CPU cap", style=f"bold {COLOR_MUTED}")
-    grid.add_row(mem_title, cpu_title)
+        mem_label = "Memory"
+        cpu_label = "CPU cap"
+    grid.add_row(
+        resource_watch_title(mem_label, "RSS  CPU", COLOR_WARN, very_short),
+        resource_watch_title(cpu_label, "CAP  MEM", COLOR_COOL, very_short),
+    )
 
     empty = Text("(no process samples)", style=COLOR_DIM)
     for i in range(row_limit):
         mem_cell = (
-            resource_item_text(top_mem[i], i + 1, "mem", compact)
+            resource_item_text(top_mem[i], i + 1, "mem", compact, max_mem, very_short)
             if i < len(top_mem)
             else empty
         )
         cpu_cell = (
-            resource_item_text(top_cpu[i], i + 1, "cpu", compact)
+            resource_item_text(top_cpu[i], i + 1, "cpu", compact, max_cpu, very_short)
             if i < len(top_cpu)
             else empty
         )
@@ -270,8 +320,8 @@ def render_resource_watch(procs: dict[int, ProcSample]) -> Panel:
 
     return Panel(
         grid,
-        title=f"[bold {COLOR_MUTED}]Current-user resource watch[/]",
-        subtitle=f"[{COLOR_DIM}]CPU normalized to whole-machine capacity[/]",
+        title=f"[bold {COLOR_TEXT}] Current-user resource watch [/]",
+        subtitle=f"[{COLOR_DIM}]CPU cap = process CPU / logical cores[/]",
         title_align="left",
         subtitle_align="right",
         border_style=COLOR_PANEL,

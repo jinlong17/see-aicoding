@@ -36,10 +36,10 @@ Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child proce
 │   ◆ XAI_Desktop  5p    ││   ◆ XAI_Desktop 4p    ││   ◆ XAI_Desktop  10p    │
 ╰────────────────────────╯╰──────────────────────╯╰────────────────────────╯
 ╭─ Current-user resource watch ──────────────────────────────────────────────╮
-│ Memory Top5                         CPU capacity Top5                     │
-│ 1. Claude Helper      1.6G  3.8%     1. Codex Helper       24.2%  512M    │
-│ 2. Cursor Helper      1.1G  0.6%     2. node               11.5%  318M    │
-╰──────────────────────── CPU normalized to whole-machine capacity ─────────╯
+│ ● Memory Top5  RSS  CPU            ● CPU capacity Top5  CAP  MEM         │
+│ #1  Claude Helper  ━━━━━━━ 1.6G  3.8%  #1  Codex Helper ━━━━━━━ 24% 512M │
+│ #2  Cursor Helper  ━━━━━── 1.1G  0.6%  #2  node         ━━━──── 12% 318M │
+╰──────────────────────── CPU cap = process CPU / logical cores ────────────╯
 ```
 
 ## Why Use It
