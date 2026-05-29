@@ -37,8 +37,8 @@ Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child proce
 ╰────────────────────────╯╰──────────────────────╯╰────────────────────────╯
 ╭─ Current-user resource watch ──────────────────────────────────────────────╮
 │ ● Memory Top5  RSS  CPU            ● CPU capacity Top5  CAP  MEM         │
-│ #1  Claude Helper  ━━━━━━━ 1.6G  3.8%  #1  Codex Helper ━━━━━━━ 24% 512M │
-│ #2  Cursor Helper  ━━━━━── 1.1G  0.6%  #2  node         ━━━──── 12% 318M │
+│ #1  Claude        ━━━━━━━ 1.8G  5.1%  #1  Codex       ━━━━━━━ 26% 740M   │
+│ #2  Google Chrome ━━━━━── 1.1G  1.0%  #2  node        ━━━──── 12% 318M   │
 ╰──────────────────────── CPU cap = process CPU / logical cores ────────────╯
 ```
 
@@ -54,7 +54,7 @@ When several AI coding tools are open at once, the expensive process is often hi
 | Is a session actually doing work? | `Status`: `HOT`, `LIVE`, `WARM`, or `IDLE` |
 | Which AI extensions are installed? | Cursor zone extension inventory |
 | Is the whole machine under pressure? | Top-right system processor, memory, storage, and network rows |
-| Which current-user processes are hottest? | Bottom resource watch: Memory Top5 and CPU capacity Top5 |
+| Which current-user apps or process groups are hottest? | Bottom resource watch: Memory Top5 and CPU capacity Top5 |
 
 ## Features
 
@@ -65,7 +65,7 @@ When several AI coding tools are open at once, the expensive process is often hi
 | Stable ordering | Sessions sort by creation time, so rows do not jump around when CPU changes |
 | Per-project totals | Process count, processor usage, and memory per detected project |
 | System context | Time, network throughput, system processor, system memory, and local storage |
-| Resource watch | Current-user Memory Top5 by RSS and CPU Top5 normalized to whole-machine capacity |
+| Resource watch | Current-user app/process-group Memory Top5 by summed RSS and CPU Top5 normalized to whole-machine capacity |
 | Extension inventory | Installed Cursor / VS Code AI extensions with version and host |
 
 ## Install
@@ -172,7 +172,7 @@ Sampling flow:
 
 - macOS resident memory includes shared library pages, so Electron/V8 memory can read higher than private working set.
 - AI processor capacity is normalized to all CPU cores; the total value is the summed per-process CPU percentage.
-- Resource watch CPU capacity divides each process CPU percentage by logical CPU count, so it is comparable with the header capacity bars.
+- Resource watch groups app helper processes together, sums each group's RSS and CPU percentage, then divides CPU by logical CPU count so it is comparable with the header capacity bars.
 - System memory uses `total - available`, so the displayed size and percentage share the same pressure-oriented basis.
 - Network speed is sampled from OS network counters, so it shows current machine traffic, not per-AI-process traffic.
 - Pure extension API activity cannot always be separated from the Cursor Extension Host process.

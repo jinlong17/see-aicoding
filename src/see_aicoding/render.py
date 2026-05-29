@@ -13,6 +13,7 @@ import platform
 import shutil
 import socket
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
@@ -187,6 +188,63 @@ def grouped_project_children(session: Session) -> tuple[dict[str, list], list]:
 # ─── Resource watch ────────────────────────────────────────────────────────
 
 
+@dataclass
+class ResourceGroup:
+    key: str
+    label: str
+    procs: list[ProcSample]
+
+    @property
+    def rss(self) -> int:
+        return sum(p.rss for p in self.procs)
+
+    @property
+    def cpu_percent(self) -> float:
+        return sum(p.cpu_percent for p in self.procs)
+
+    @property
+    def primary_pid(self) -> int:
+        return min(p.pid for p in self.procs)
+
+    @property
+    def proc_count(self) -> int:
+        return len(self.procs)
+
+
+def app_bundle_label(proc: ProcSample) -> str:
+    for source in (proc.exe, proc.cmdline_str):
+        parts = Path(source).parts
+        for part in parts:
+            if part.endswith(".app"):
+                return part[:-4]
+    return ""
+
+
+def resource_group_label(proc: ProcSample) -> str:
+    bundle = app_bundle_label(proc)
+    if bundle:
+        return bundle
+    name = proc.name or resource_proc_label(proc)
+    if name in {"node", "python", "python3"}:
+        return resource_proc_label(proc)
+    for marker in (" Helper", " Web Content"):
+        if marker in name:
+            return name.split(marker, 1)[0]
+    if name.endswith(" Renderer"):
+        return name.rsplit(" Renderer", 1)[0]
+    return name
+
+
+def build_resource_groups(procs: list[ProcSample]) -> list[ResourceGroup]:
+    groups: dict[str, ResourceGroup] = {}
+    for proc in procs:
+        label = resource_group_label(proc)
+        key = label.lower()
+        group = groups.setdefault(key, ResourceGroup(key=key, label=label, procs=[]))
+        group.procs.append(proc)
+    return list(groups.values())
+
+
 def resource_proc_label(proc: ProcSample, width: int = 28) -> str:
     label = short_proc_label(proc, width=width)
     if label:
@@ -199,6 +257,11 @@ def resource_proc_label(proc: ProcSample, width: int = 28) -> str:
 def cpu_capacity(proc: ProcSample, n_cpus: int | None = None) -> float:
     logical_cpus = n_cpus or psutil.cpu_count() or 1
     return proc.cpu_percent / logical_cpus
+
+
+def group_cpu_capacity(group: ResourceGroup, n_cpus: int | None = None) -> float:
+    logical_cpus = n_cpus or psutil.cpu_count() or 1
+    return group.cpu_percent / logical_cpus
 
 
 def resource_rank_style(rank: int) -> str:
@@ -234,17 +297,17 @@ def resource_watch_title(label: str, hint: str, accent: str, very_short: bool) -
 
 
 def resource_item_text(
-    proc: ProcSample,
+    group: ResourceGroup,
     rank: int,
     primary: str,
     compact: bool,
     max_primary: float,
     very_short: bool,
 ) -> Text:
-    cpu_pct = cpu_capacity(proc)
+    cpu_pct = group_cpu_capacity(group)
     name_width = 15 if compact else 24
     bar_width = 4 if compact else 7
-    name = resource_proc_label(proc, width=name_width)
+    name = group.label[:name_width]
 
     txt = Text()
     txt.append(f"#{rank:<2}", style=resource_rank_style(rank))
@@ -254,9 +317,9 @@ def resource_item_text(
 
     if primary == "mem":
         if bar_width:
-            txt.append_text(resource_bar(float(proc.rss), max_primary, bar_width, mem_color(proc.rss)))
+            txt.append_text(resource_bar(float(group.rss), max_primary, bar_width, mem_color(group.rss)))
             txt.append(" ", style=COLOR_DIM)
-        txt.append(f"{compact_size(proc.rss):>5}", style=mem_color(proc.rss))
+        txt.append(f"{compact_size(group.rss):>5}", style=mem_color(group.rss))
         txt.append(" ", style=COLOR_DIM)
         txt.append(f"{cpu_pct:>4.1f}%", style=cpu_color(cpu_pct))
     else:
@@ -265,9 +328,10 @@ def resource_item_text(
             txt.append(" ", style=COLOR_DIM)
         txt.append(f"{cpu_pct:>4.1f}%", style=cpu_color(cpu_pct))
         txt.append(" ", style=COLOR_DIM)
-        txt.append(f"{compact_size(proc.rss):>5}", style=mem_color(proc.rss))
+        txt.append(f"{compact_size(group.rss):>5}", style=mem_color(group.rss))
     if not compact and not very_short:
-        txt.append(f"  pid {proc.pid}", style=COLOR_DIM)
+        detail = f"{group.proc_count}p" if group.proc_count > 1 else f"pid {group.primary_pid}"
+        txt.append(f"  {detail}", style=COLOR_DIM)
     return txt
 
 
@@ -284,11 +348,11 @@ def render_resource_watch(procs: dict[int, ProcSample]) -> Panel:
     compact = columns < 150 or lines < 30
     very_short = lines < 26
     row_limit = resource_watch_row_limit(lines)
-    all_procs = list(procs.values())
-    top_mem = sorted(all_procs, key=lambda p: (-p.rss, -p.cpu_percent, p.pid))[:row_limit]
-    top_cpu = sorted(all_procs, key=lambda p: (-cpu_capacity(p), -p.rss, p.pid))[:row_limit]
+    groups = build_resource_groups(list(procs.values()))
+    top_mem = sorted(groups, key=lambda g: (-g.rss, -g.cpu_percent, g.label))[:row_limit]
+    top_cpu = sorted(groups, key=lambda g: (-group_cpu_capacity(g), -g.rss, g.label))[:row_limit]
     max_mem = float(top_mem[0].rss) if top_mem else 0.0
-    max_cpu = cpu_capacity(top_cpu[0]) if top_cpu else 0.0
+    max_cpu = group_cpu_capacity(top_cpu[0]) if top_cpu else 0.0
 
     grid = Table.grid(expand=True, padding=(0, 2 if not compact else 1))
     grid.add_column(ratio=1)
