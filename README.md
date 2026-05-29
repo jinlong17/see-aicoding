@@ -124,6 +124,7 @@ see-aicoding --all            # include idle sessions
 see-aicoding --no-tree        # one row per session
 see-aicoding --once           # print one snapshot and exit
 see-aicoding --full-screen    # alternate-screen mode
+see-aicoding --web --open     # local web monitor at 127.0.0.1:8765
 ```
 
 | Flag | Default | Effect |
@@ -134,6 +135,23 @@ see-aicoding --full-screen    # alternate-screen mode
 | `--no-tree` | off | Hide descendant process tree |
 | `--once` | off | Render one snapshot and exit |
 | `--full-screen` | off | Use terminal alternate screen |
+| `--web` | off | Run the localhost web monitor instead of the terminal dashboard |
+| `--open` | off | Open the web monitor in the default browser; only applies with `--web` |
+| `--host HOST` | `127.0.0.1` | Web monitor host; localhost addresses only |
+| `--port PORT` | `8765` | Web monitor port |
+
+## Web Monitor
+
+```bash
+see-aicoding --web --open
+```
+
+The web monitor keeps the same sampling engine as the terminal dashboard and
+serves a local-only control surface at `http://127.0.0.1:8765/`. It supports
+live updates, Active/All filtering, process tree toggling, search, session
+details, grouped Resource watch Top5 with Chrome tab counts when available, and
+copying PID, cwd, or command text. It does not expose destructive process
+controls.
 
 ## Troubleshooting
 
@@ -210,6 +228,9 @@ src/see_aicoding/
 ├── cli.py             # argparse, refresh loop, Live rendering
 ├── monitor.py         # process sampling, classification, session aggregation
 ├── render.py          # Rich layout, panels, colors, tables
+├── snapshot.py        # JSON snapshots for the web monitor
+├── web.py             # local ThreadingHTTPServer + SSE endpoints
+├── web_static/        # browser UI assets
 ├── cursor_ext.py      # Cursor / VS Code AI extension scanner
 ├── __main__.py        # python -m see_aicoding
 └── __init__.py
@@ -222,6 +243,7 @@ Sampling flow:
 3. `build_sessions()` picks root processes and attributes descendants through the parent-process chain.
 4. Project names are inferred from cwd, repo markers, and selected desktop app child processes.
 5. `render_all()` draws the header, three zones, current-user resource watch, footer, sparklines, and extension inventory.
+6. `build_snapshot()` exposes the same samples as JSON for `/api/snapshot` and `/events`.
 
 ## Notes
 

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>see-aicoding</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">sa</span>
+        <div>
+          <h1>see-aicoding</h1>
+          <p id="hostLine">Local monitor</p>
+        </div>
+      </div>
+      <div class="toolbar" aria-label="Monitor controls">
+        <label class="search">
+          <span class="sr-only">Search</span>
+          <input id="searchInput" type="search" placeholder="Search project, tool, pid">
+        </label>
+        <div class="segmented" role="group" aria-label="Session visibility">
+          <button id="activeBtn" class="is-active" type="button">Active</button>
+          <button id="allBtn" type="button">All</button>
+        </div>
+        <label class="switch">
+          <input id="treeToggle" type="checkbox" checked>
+          <span>Tree</span>
+        </label>
+        <button id="pauseBtn" class="tool-btn" type="button">Pause</button>
+      </div>
+    </header>
+
+    <section class="metrics" aria-label="System overview">
+      <article class="metric metric-ai">
+        <div class="metric-body">
+          <div class="metric-label">AI processor</div>
+          <div class="metric-value" id="aiCpu">--</div>
+        </div>
+        <div id="aiCpuGauge" class="gauge" aria-hidden="true"><span></span></div>
+        <div class="meter"><span id="aiCpuBar"></span></div>
+      </article>
+      <article class="metric">
+        <div class="metric-body">
+          <div class="metric-label">AI memory</div>
+          <div class="metric-value" id="aiMem">--</div>
+        </div>
+        <div id="aiMemGauge" class="gauge gauge-memory" aria-hidden="true"><span></span></div>
+        <div class="meter"><span id="aiMemBar"></span></div>
+      </article>
+      <article class="metric">
+        <div class="metric-body">
+          <div class="metric-label">System processor</div>
+          <div class="metric-value" id="sysCpu">--</div>
+        </div>
+        <div id="sysCpuGauge" class="gauge gauge-system" aria-hidden="true"><span></span></div>
+        <div class="meter"><span id="sysCpuBar"></span></div>
+      </article>
+      <article class="metric">
+        <div class="metric-body">
+          <div class="metric-label">System memory</div>
+          <div class="metric-value" id="sysMem">--</div>
+        </div>
+        <div id="sysMemGauge" class="gauge gauge-memory" aria-hidden="true"><span></span></div>
+        <div class="meter"><span id="sysMemBar"></span></div>
+      </article>
+      <article class="metric">
+        <div class="metric-body">
+          <div class="metric-label">Network</div>
+          <div class="metric-value" id="networkRate">--</div>
+          <div class="metric-sub" id="updateTime">Waiting</div>
+        </div>
+        <div id="networkGauge" class="gauge gauge-network" aria-hidden="true"><span></span></div>
+      </article>
+    </section>
+
+    <section class="trend-panel" aria-label="AI trend">
+      <div>
+        <div class="trend-head">
+          <div class="section-label">AI workload trend</div>
+          <div id="trendPeak" class="trend-peak">Peak --</div>
+        </div>
+        <div id="sparkline" class="sparkline" aria-hidden="true"></div>
+      </div>
+      <div id="connectionState" class="connection is-waiting">Connecting</div>
+    </section>
+
+    <main id="zones" class="zones" aria-label="AI coding sessions"></main>
+
+    <section class="resources" aria-label="Current-user resource watch">
+      <div>
+        <div class="section-label">Memory Top5</div>
+        <div id="topMemory" class="leader-list"></div>
+      </div>
+      <div>
+        <div class="section-label">CPU capacity Top5</div>
+        <div id="topCpu" class="leader-list"></div>
+      </div>
+    </section>
+  </div>
+
+  <aside id="detailsDrawer" class="details" aria-label="Session details" aria-hidden="true">
+    <div class="details-head">
+      <div>
+        <div class="section-label">Session details</div>
+        <h2 id="detailsTitle">No session selected</h2>
+      </div>
+      <button id="closeDetails" class="icon-btn" type="button" aria-label="Close details">x</button>
+    </div>
+    <div id="detailsBody" class="details-body"></div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

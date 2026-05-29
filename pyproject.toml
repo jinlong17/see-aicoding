@@ -40,3 +40,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 see_aicoding = ["py.typed"]
+"see_aicoding.web_static" = ["*.html", "*.css", "*.js"]

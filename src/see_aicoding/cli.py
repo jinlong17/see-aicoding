@@ -33,6 +33,14 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Print a single snapshot and exit (no live loop).")
     p.add_argument("--full-screen", action="store_true",
                    help="Use alternate-screen mode (clears terminal on exit, no scrollback).")
+    p.add_argument("--web", action="store_true",
+                   help="Run the local web monitor instead of the terminal dashboard.")
+    p.add_argument("--open", action="store_true",
+                   help="Open the web monitor in the default browser (only with --web).")
+    p.add_argument("--host", default="127.0.0.1",
+                   help="Web monitor host (default 127.0.0.1; localhost only).")
+    p.add_argument("--port", type=int, default=8765,
+                   help="Web monitor port (default 8765).")
     p.add_argument("--version", action="version", version=f"see-aicoding {__version__}")
     return p
 
@@ -42,6 +50,12 @@ def main(argv: list[str] | None = None) -> int:
     refresh = max(0.5, args.interval)
     show_tree = not args.no_tree
     hide_idle = not args.all
+
+    if args.web:
+        from .web import run_web_server
+
+        return run_web_server(args.host, args.port, refresh, args.open)
+
     console = Console()
     sampler = Sampler()
     history = History()
