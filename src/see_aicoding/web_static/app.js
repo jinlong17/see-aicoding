@@ -102,6 +102,7 @@ function networkGaugePercent(downloadBytes, uploadBytes) {
 }
 
 function setConnection(text, mode) {
+  if (!el.connectionState) return;
   el.connectionState.textContent = text;
   el.connectionState.classList.toggle("is-waiting", mode === "waiting");
   el.connectionState.classList.toggle("is-error", mode === "error");
@@ -135,14 +136,69 @@ async function copyText(text, label = "Copied") {
   showToast(label);
 }
 
-function sparkBars(values, color) {
-  const list = Array.isArray(values) ? values.slice(-40) : [];
-  const max = Math.max(1, ...list);
-  if (!list.length) return `<span style="height:2px;background:${color}"></span>`;
-  return list
-    .map((value) => {
-      const height = Math.max(2, Math.round((Number(value || 0) / max) * 36));
-      return `<span style="height:${height}px;background:${color}"></span>`;
+const TREND_SLOTS = 40;
+
+function renderAreaChart(values, color, scaleMax = null, chartId = "trend") {
+  const list = Array.isArray(values) ? values.slice(-TREND_SLOTS) : [];
+  const max = Math.max(1, Number(scaleMax || 0), ...list);
+  const padding = Array.from({ length: Math.max(0, TREND_SLOTS - list.length) }, () => 0);
+  const slots = [...padding, ...list];
+  const width = 240;
+  const height = 54;
+  const top = 5;
+  const bottom = 47;
+  const step = width / Math.max(1, TREND_SLOTS - 1);
+  const points = slots.map((value, index) => {
+    const ratio = Math.max(0, Math.min(1, Number(value || 0) / max));
+    const x = Number((index * step).toFixed(2));
+    const y = Number((bottom - ratio * (bottom - top)).toFixed(2));
+    return [x, y];
+  });
+  const linePoints = points.map(([x, y]) => `${x},${y}`).join(" ");
+  const areaPoints = `0,${bottom} ${linePoints} ${width},${bottom}`;
+  const lastPoint = points[points.length - 1] || [0, bottom];
+  const gradientId = `area-${String(chartId).replace(/[^a-z0-9_-]/gi, "")}`;
+  return `
+    <svg class="trend-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="Trend ${formatPct(list[list.length - 1] || 0, 1)}">
+      <defs>
+        <linearGradient id="${gradientId}" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="${color}" stop-opacity="0.72"></stop>
+          <stop offset="58%" stop-color="${color}" stop-opacity="0.34"></stop>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0.08"></stop>
+        </linearGradient>
+      </defs>
+      <path class="trend-area" d="M ${areaPoints} Z" fill="url(#${gradientId})"></path>
+      <polyline class="trend-line" points="${linePoints}" style="--spark-color:${color}"></polyline>
+      <circle class="trend-endpoint" cx="${lastPoint[0]}" cy="${lastPoint[1]}" r="2.5" style="--spark-color:${color}"></circle>
+    </svg>`;
+}
+
+function zoneRgb(zoneId) {
+  if (zoneId === "claude") return "180, 140, 255";
+  if (zoneId === "codex") return "48, 213, 168";
+  return "67, 191, 242";
+}
+
+function renderTrendLanes(snapshot) {
+  const zones = snapshot.zones || [];
+  const allValues = zones.flatMap((zone) => zone.history || []);
+  const scaleMax = Math.max(10, ...allValues);
+  if (!zones.length) return `<div class="empty">No trend samples</div>`;
+  return zones
+    .map((zone) => {
+      const color = zoneStyle(zone);
+      const history = zone.history || [];
+      const peak = Math.max(0, ...history);
+      return `
+        <div class="trend-lane trend-${escapeHtml(zone.id)}" style="--trend-color:${color};--trend-rgb:${zoneRgb(zone.id)}">
+          <div class="trend-lane-head">
+            <span class="trend-dot"></span>
+            <span class="trend-name">${escapeHtml(zone.title)}</span>
+            <span>${formatPct(zone.cpu_capacity_percent || 0, 1)} cap</span>
+            <span>Peak ${formatPct(peak, 1)}</span>
+          </div>
+          <div class="sparkline">${renderAreaChart(history, color, scaleMax, zone.id)}</div>
+        </div>`;
     })
     .join("");
 }
@@ -266,8 +322,8 @@ function renderMetrics(snapshot) {
   el.networkRate.textContent = `${formatRate(network.download_bytes_per_s || 0)} down`;
   setGauge(el.networkGauge, networkGaugePercent(network.download_bytes_per_s || 0, network.upload_bytes_per_s || 0));
   el.updateTime.textContent = `${formatRate(network.upload_bytes_per_s || 0)} up - ${new Date((snapshot.generated_at || 0) * 1000).toLocaleTimeString()}`;
-  el.sparkline.innerHTML = sparkBars(ai.history || [], "var(--codex)");
-  el.trendPeak.textContent = `Peak ${formatPct(Math.max(0, ...(ai.history || [])), 1)}`;
+  el.sparkline.innerHTML = renderTrendLanes(snapshot);
+  el.trendPeak.textContent = "By tool";
 }
 
 function zoneStyle(zone) {

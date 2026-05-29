@@ -78,14 +78,16 @@
     </section>
 
     <section class="trend-panel" aria-label="AI trend">
-      <div>
+      <div class="trend-main">
         <div class="trend-head">
           <div class="section-label">AI workload trend</div>
-          <div id="trendPeak" class="trend-peak">Peak --</div>
+          <div class="trend-meta">
+            <div id="trendPeak" class="trend-peak">By tool</div>
+            <div id="connectionState" class="connection is-waiting">Connecting</div>
+          </div>
         </div>
-        <div id="sparkline" class="sparkline" aria-hidden="true"></div>
+        <div id="sparkline" class="trend-lanes" aria-hidden="true"></div>
       </div>
-      <div id="connectionState" class="connection is-waiting">Connecting</div>
     </section>
 
     <main id="zones" class="zones" aria-label="AI coding sessions"></main>
