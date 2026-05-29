@@ -266,7 +266,7 @@ tell application "Google Chrome"
     repeat with chromeWindow in windows
         set tabCount to tabCount + (count of tabs of chromeWindow)
     end repeat
-    return (windowCount as text) & "w/" & (tabCount as text) & "t"
+    return (windowCount as text) & "|" & (tabCount as text)
 end tell
 """.strip()
     try:
@@ -281,7 +281,17 @@ end tell
         _chrome_tab_stats_cache = (now, None)
         return None
 
-    value = result.stdout.strip() if result.returncode == 0 else ""
+    value = ""
+    if result.returncode == 0:
+        raw_value = result.stdout.strip()
+        try:
+            window_count, tab_count = [int(part) for part in raw_value.split("|", 1)]
+        except (TypeError, ValueError):
+            value = ""
+        else:
+            window_label = "window" if window_count == 1 else "windows"
+            tab_label = "tab" if tab_count == 1 else "tabs"
+            value = f"{window_count} {window_label} / {tab_count} {tab_label}"
     _chrome_tab_stats_cache = (now, value or None)
     return _chrome_tab_stats_cache[1]
 
