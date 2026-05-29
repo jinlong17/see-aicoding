@@ -73,13 +73,19 @@ When several AI coding tools are open at once, the expensive process is often hi
 Install from GitHub:
 
 ```bash
-pip install --user git+https://github.com/jinlong17/see-aicoding.git
+python3 -m pip install --user git+https://github.com/jinlong17/see-aicoding.git
 ```
 
 Or with `pipx`:
 
 ```bash
 pipx install git+https://github.com/jinlong17/see-aicoding.git
+```
+
+Upgrade an existing install from the latest `main` branch:
+
+```bash
+python3 -m pip install --user --upgrade --force-reinstall git+https://github.com/jinlong17/see-aicoding.git
 ```
 
 For local development:
@@ -89,7 +95,8 @@ git clone https://github.com/jinlong17/see-aicoding.git
 cd see-aicoding
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+python3 -m pip install --upgrade pip
+python3 -m pip install -e .
 see-aicoding
 ```
 
@@ -97,6 +104,15 @@ If the command is not found after a `pip --user` install, add your Python user-b
 
 ```bash
 python3 -m site --user-base
+```
+
+If your `see-aicoding` command is a local wrapper that launches a dedicated
+virtualenv, update that virtualenv directly. For example, this repository's
+Homebrew-style wrapper at `/opt/homebrew/bin/see-aicoding` launches
+`~/.local/share/see-aicoding/venv/bin/see-aicoding`, so upgrade it with:
+
+```bash
+~/.local/share/see-aicoding/venv/bin/python -m pip install --upgrade --force-reinstall git+https://github.com/jinlong17/see-aicoding.git
 ```
 
 ## Usage
@@ -118,6 +134,45 @@ see-aicoding --full-screen    # alternate-screen mode
 | `--no-tree` | off | Hide descendant process tree |
 | `--once` | off | Render one snapshot and exit |
 | `--full-screen` | off | Use terminal alternate screen |
+
+## Troubleshooting
+
+Check which executable your shell is running:
+
+```bash
+which see-aicoding
+see-aicoding --version
+```
+
+Check whether the loaded package includes the current Resource watch features:
+
+```bash
+python3 - <<'PY'
+import see_aicoding.render as render
+print(render.__file__)
+print(hasattr(render, "ResourceGroup"))
+print(hasattr(render, "chrome_tab_stats"))
+PY
+```
+
+If `which see-aicoding` points to a wrapper script, inspect the first few lines
+of that wrapper and upgrade the Python environment named there:
+
+```bash
+head -20 "$(which see-aicoding)"
+```
+
+If the bottom Resource watch is missing or Chrome tab details are not visible,
+try a one-shot render with enough terminal space:
+
+```bash
+COLUMNS=170 LINES=40 see-aicoding --once --no-tree
+```
+
+Compact terminals keep the Resource watch panel but hide extra details such as
+Chrome window/tab counts. Chrome counts also require macOS permission for the
+terminal to query Google Chrome through AppleScript; if permission is denied,
+the dashboard silently falls back to process counts.
 
 ## Detection
 
