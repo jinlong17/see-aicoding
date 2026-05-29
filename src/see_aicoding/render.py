@@ -12,7 +12,9 @@ import getpass
 import platform
 import shutil
 import socket
+import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
@@ -26,6 +28,7 @@ from .cursor_ext import ExtensionInfo, group_by_family
 from .monitor import (
     KIND_META,
     ProjectSummary,
+    ProcSample,
     ZONE_CLAUDE,
     ZONE_CODEX,
     ZONE_CURSOR,
@@ -67,6 +70,9 @@ PROJECT_PALETTE = (
 MAX_CHILD_ROWS = 12
 MAX_PROJECT_CHILD_ROWS = 5
 IDLE_CPU_THRESHOLD = 0.5
+CHROME_TAB_STATS_TTL_S = 5.0
+CHROME_TAB_STATS_TIMEOUT_S = 1.0
+_chrome_tab_stats_cache: tuple[float, str | None] = (0.0, None)
 
 
 def visible_sessions(sessions: list[Session], hide_idle: bool) -> list[Session]:
@@ -181,6 +187,269 @@ def grouped_project_children(session: Session) -> tuple[dict[str, list], list]:
         else:
             helpers.append(child)
     return by_project, helpers
+
+
+# ─── Resource watch ────────────────────────────────────────────────────────
+
+
+@dataclass
+class ResourceGroup:
+    key: str
+    label: str
+    procs: list[ProcSample]
+
+    @property
+    def rss(self) -> int:
+        return sum(p.rss for p in self.procs)
+
+    @property
+    def cpu_percent(self) -> float:
+        return sum(p.cpu_percent for p in self.procs)
+
+    @property
+    def primary_pid(self) -> int:
+        return min(p.pid for p in self.procs)
+
+    @property
+    def proc_count(self) -> int:
+        return len(self.procs)
+
+
+def app_bundle_label(proc: ProcSample) -> str:
+    for source in (proc.exe, proc.cmdline_str):
+        parts = Path(source).parts
+        for part in parts:
+            if part.endswith(".app"):
+                return part[:-4]
+    return ""
+
+
+def resource_group_label(proc: ProcSample) -> str:
+    bundle = app_bundle_label(proc)
+    if bundle:
+        return bundle
+    name = proc.name or resource_proc_label(proc)
+    if name in {"node", "python", "python3"}:
+        return resource_proc_label(proc)
+    for marker in (" Helper", " Web Content"):
+        if marker in name:
+            return name.split(marker, 1)[0]
+    if name.endswith(" Renderer"):
+        return name.rsplit(" Renderer", 1)[0]
+    return name
+
+
+def build_resource_groups(procs: list[ProcSample]) -> list[ResourceGroup]:
+    groups: dict[str, ResourceGroup] = {}
+    for proc in procs:
+        label = resource_group_label(proc)
+        key = label.lower()
+        group = groups.setdefault(key, ResourceGroup(key=key, label=label, procs=[]))
+        group.procs.append(proc)
+    return list(groups.values())
+
+
+def chrome_tab_stats() -> str | None:
+    if platform.system() != "Darwin":
+        return None
+    global _chrome_tab_stats_cache
+    now = time.monotonic()
+    cached_at, cached_value = _chrome_tab_stats_cache
+    if cached_at > 0 and now - cached_at < CHROME_TAB_STATS_TTL_S:
+        return cached_value
+
+    script = """
+if application "Google Chrome" is not running then return ""
+tell application "Google Chrome"
+    set windowCount to count of windows
+    set tabCount to 0
+    repeat with chromeWindow in windows
+        set tabCount to tabCount + (count of tabs of chromeWindow)
+    end repeat
+    return (windowCount as text) & "|" & (tabCount as text)
+end tell
+""".strip()
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=CHROME_TAB_STATS_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        _chrome_tab_stats_cache = (now, None)
+        return None
+
+    value = ""
+    if result.returncode == 0:
+        raw_value = result.stdout.strip()
+        try:
+            window_count, tab_count = [int(part) for part in raw_value.split("|", 1)]
+        except (TypeError, ValueError):
+            value = ""
+        else:
+            window_label = "window" if window_count == 1 else "windows"
+            tab_label = "tab" if tab_count == 1 else "tabs"
+            value = f"{window_count} {window_label} / {tab_count} {tab_label}"
+    _chrome_tab_stats_cache = (now, value or None)
+    return _chrome_tab_stats_cache[1]
+
+
+def resource_group_detail(group: ResourceGroup) -> str:
+    detail = f"{group.proc_count}p" if group.proc_count > 1 else f"pid {group.primary_pid}"
+    if group.label == "Google Chrome":
+        tab_stats = chrome_tab_stats()
+        if tab_stats:
+            return f"{detail} {tab_stats}"
+    return detail
+
+
+def resource_proc_label(proc: ProcSample, width: int = 28) -> str:
+    label = short_proc_label(proc, width=width)
+    if label:
+        return label[:width]
+    if proc.exe:
+        return Path(proc.exe).name[:width]
+    return f"pid {proc.pid}"
+
+
+def cpu_capacity(proc: ProcSample, n_cpus: int | None = None) -> float:
+    logical_cpus = n_cpus or psutil.cpu_count() or 1
+    return proc.cpu_percent / logical_cpus
+
+
+def group_cpu_capacity(group: ResourceGroup, n_cpus: int | None = None) -> float:
+    logical_cpus = n_cpus or psutil.cpu_count() or 1
+    return group.cpu_percent / logical_cpus
+
+
+def resource_rank_style(rank: int) -> str:
+    if rank == 1:
+        return f"bold {COLOR_HOT}"
+    if rank == 2:
+        return f"bold {COLOR_WARN}"
+    if rank == 3:
+        return f"bold {COLOR_COOL}"
+    return COLOR_DIM
+
+
+def resource_bar(value: float, max_value: float, width: int, color: str) -> Text:
+    return progress_bar(
+        value,
+        max(max_value, 0.0001),
+        width=width,
+        color=color,
+        filled_char="━",
+        empty_char="─",
+        empty_style=COLOR_TRACK,
+        min_filled=1 if value > 0 else 0,
+    )
+
+
+def resource_watch_title(label: str, hint: str, accent: str, very_short: bool) -> Text:
+    txt = Text()
+    txt.append("● ", style=accent)
+    txt.append(label, style=f"bold {COLOR_TEXT}")
+    if not very_short:
+        txt.append(f"  {hint}", style=COLOR_DIM)
+    return txt
+
+
+def resource_item_text(
+    group: ResourceGroup,
+    rank: int,
+    primary: str,
+    compact: bool,
+    max_primary: float,
+    very_short: bool,
+) -> Text:
+    cpu_pct = group_cpu_capacity(group)
+    name_width = 15 if compact else 24
+    bar_width = 4 if compact else 7
+    name = group.label[:name_width]
+
+    txt = Text()
+    txt.append(f"#{rank:<2}", style=resource_rank_style(rank))
+    txt.append(" ", style=COLOR_DIM)
+    txt.append(f"{name:<{name_width}}", style=COLOR_TEXT)
+    txt.append(" ", style=COLOR_DIM)
+
+    if primary == "mem":
+        if bar_width:
+            txt.append_text(resource_bar(float(group.rss), max_primary, bar_width, mem_color(group.rss)))
+            txt.append(" ", style=COLOR_DIM)
+        txt.append(f"{compact_size(group.rss):>5}", style=mem_color(group.rss))
+        txt.append(" ", style=COLOR_DIM)
+        txt.append(f"{cpu_pct:>4.1f}%", style=cpu_color(cpu_pct))
+    else:
+        if bar_width:
+            txt.append_text(resource_bar(cpu_pct, max_primary, bar_width, cpu_color(cpu_pct)))
+            txt.append(" ", style=COLOR_DIM)
+        txt.append(f"{cpu_pct:>4.1f}%", style=cpu_color(cpu_pct))
+        txt.append(" ", style=COLOR_DIM)
+        txt.append(f"{compact_size(group.rss):>5}", style=mem_color(group.rss))
+    if not compact and not very_short:
+        txt.append(f"  {resource_group_detail(group)}", style=COLOR_DIM)
+    return txt
+
+
+def resource_watch_row_limit(lines: int) -> int:
+    if lines < 26:
+        return 3
+    if lines < 32:
+        return 4
+    return 5
+
+
+def render_resource_watch(procs: dict[int, ProcSample]) -> Panel:
+    columns, lines = shutil.get_terminal_size((120, 24))
+    compact = columns < 150 or lines < 30
+    very_short = lines < 26
+    row_limit = resource_watch_row_limit(lines)
+    groups = build_resource_groups(list(procs.values()))
+    top_mem = sorted(groups, key=lambda g: (-g.rss, -g.cpu_percent, g.label))[:row_limit]
+    top_cpu = sorted(groups, key=lambda g: (-group_cpu_capacity(g), -g.rss, g.label))[:row_limit]
+    max_mem = float(top_mem[0].rss) if top_mem else 0.0
+    max_cpu = group_cpu_capacity(top_cpu[0]) if top_cpu else 0.0
+
+    grid = Table.grid(expand=True, padding=(0, 2 if not compact else 1))
+    grid.add_column(ratio=1)
+    grid.add_column(ratio=1)
+
+    mem_label = "Memory Top5" if row_limit == 5 else "Memory leaders"
+    cpu_label = "CPU capacity Top5" if row_limit == 5 else "CPU cap leaders"
+    if very_short:
+        mem_label = "Memory"
+        cpu_label = "CPU cap"
+    grid.add_row(
+        resource_watch_title(mem_label, "RSS  CPU", COLOR_WARN, very_short),
+        resource_watch_title(cpu_label, "CAP  MEM", COLOR_COOL, very_short),
+    )
+
+    empty = Text("(no process samples)", style=COLOR_DIM)
+    for i in range(row_limit):
+        mem_cell = (
+            resource_item_text(top_mem[i], i + 1, "mem", compact, max_mem, very_short)
+            if i < len(top_mem)
+            else empty
+        )
+        cpu_cell = (
+            resource_item_text(top_cpu[i], i + 1, "cpu", compact, max_cpu, very_short)
+            if i < len(top_cpu)
+            else empty
+        )
+        grid.add_row(mem_cell, cpu_cell)
+
+    return Panel(
+        grid,
+        title=f"[bold {COLOR_TEXT}] Current-user resource watch [/]",
+        subtitle=f"[{COLOR_DIM}]CPU cap = process CPU / logical cores[/]",
+        title_align="left",
+        subtitle_align="right",
+        border_style=COLOR_PANEL,
+        padding=(0, 1),
+    )
 
 
 # ─── Progress bar (inline, monochrome → 3-color gradient) ──────────────────
@@ -642,17 +911,21 @@ def render_footer(refresh_s: float, show_tree: bool, hide_idle: bool, hidden_tot
 
 def render_all(
     sessions: list[Session],
+    procs: dict[int, ProcSample],
     history: History,
     extensions: list[ExtensionInfo],
     refresh_s: float,
     show_tree: bool,
     hide_idle: bool,
 ) -> RenderableType:
-    """Build the full layout: header + 3 zones + footer."""
+    """Build the full layout: header + 3 zones + resource watch + footer."""
+    terminal_lines = shutil.get_terminal_size((120, 24)).lines
+    resource_size = resource_watch_row_limit(terminal_lines) + 3
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=6),
         Layout(name="body", ratio=1),
+        Layout(name="resources", size=resource_size),
         Layout(name="footer", size=1),
     )
     layout["header"].update(render_header(sessions, history, refresh_s, hide_idle))
@@ -666,6 +939,7 @@ def render_all(
     body["codex"].update(render_zone(ZONE_CODEX, sessions, history, show_tree, hide_idle))
     body["cursor"].update(render_zone(ZONE_CURSOR, sessions, history, show_tree, hide_idle, extensions))
     layout["body"].update(body)
+    layout["resources"].update(render_resource_watch(procs))
 
     hidden_total = len(sessions) - len(visible_sessions(sessions, hide_idle)) if hide_idle else 0
     layout["footer"].update(render_footer(refresh_s, show_tree, hide_idle, hidden_total))

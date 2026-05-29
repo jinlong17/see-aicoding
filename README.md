@@ -4,7 +4,7 @@
 
 **A focused terminal dashboard for AI coding processes.**
 
-Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child processes, CPU, memory, uptime, project attribution, local storage, and network throughput from one compact TUI.
+Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child processes, CPU, memory, uptime, project attribution, local storage, network throughput, and current-user resource Top5 pressure from one compact TUI.
 
 `pip install --user git+https://github.com/jinlong17/see-aicoding.git`
 
@@ -35,6 +35,11 @@ Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child proce
 │   ◆ Any2K        9p    ││   ◆ see-aicoding 8p   ││   ◆ Any2K        42p    │
 │   ◆ XAI_Desktop  5p    ││   ◆ XAI_Desktop 4p    ││   ◆ XAI_Desktop  10p    │
 ╰────────────────────────╯╰──────────────────────╯╰────────────────────────╯
+╭─ Current-user resource watch ──────────────────────────────────────────────╮
+│ ● Memory Top5  RSS  CPU            ● CPU capacity Top5  CAP  MEM         │
+│ #1  Claude        ━━━━━━━ 1.8G  5.1%  #1  Codex       ━━━━━━━ 26% 740M   │
+│ #2  Google Chrome ━━━━━── 1.1G  1.0% 14p 3 windows / 48 tabs             │
+╰──────────────────────── CPU cap = process CPU / logical cores ────────────╯
 ```
 
 ## Why Use It
@@ -49,6 +54,7 @@ When several AI coding tools are open at once, the expensive process is often hi
 | Is a session actually doing work? | `Status`: `HOT`, `LIVE`, `WARM`, or `IDLE` |
 | Which AI extensions are installed? | Cursor zone extension inventory |
 | Is the whole machine under pressure? | Top-right system processor, memory, storage, and network rows |
+| Which current-user apps or process groups are hottest? | Bottom resource watch: Memory Top5 and CPU capacity Top5 |
 
 ## Features
 
@@ -59,6 +65,7 @@ When several AI coding tools are open at once, the expensive process is often hi
 | Stable ordering | Sessions sort by creation time, so rows do not jump around when CPU changes |
 | Per-project totals | Process count, processor usage, and memory per detected project |
 | System context | Time, network throughput, system processor, system memory, and local storage |
+| Resource watch | Current-user app/process-group Memory Top5 by summed RSS and CPU Top5 normalized to whole-machine capacity, with Chrome tab counts on macOS when permitted |
 | Extension inventory | Installed Cursor / VS Code AI extensions with version and host |
 
 ## Install
@@ -159,12 +166,14 @@ Sampling flow:
 2. `classify()` tags each process as Claude, Codex, Cursor, extension, MCP, or child.
 3. `build_sessions()` picks root processes and attributes descendants through the parent-process chain.
 4. Project names are inferred from cwd, repo markers, and selected desktop app child processes.
-5. `render_all()` draws the header, three zones, footer, sparklines, and extension inventory.
+5. `render_all()` draws the header, three zones, current-user resource watch, footer, sparklines, and extension inventory.
 
 ## Notes
 
 - macOS resident memory includes shared library pages, so Electron/V8 memory can read higher than private working set.
 - AI processor capacity is normalized to all CPU cores; the total value is the summed per-process CPU percentage.
+- Resource watch groups app helper processes together, sums each group's RSS and CPU percentage, then divides CPU by logical CPU count so it is comparable with the header capacity bars.
+- On macOS, Google Chrome rows can append full window and tab counts via AppleScript when the terminal has permission to query Chrome; failures are hidden so monitoring keeps working.
 - System memory uses `total - available`, so the displayed size and percentage share the same pressure-oriented basis.
 - Network speed is sampled from OS network counters, so it shows current machine traffic, not per-AI-process traffic.
 - Pure extension API activity cannot always be separated from the Cursor Extension Host process.
