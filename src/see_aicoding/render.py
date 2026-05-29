@@ -26,6 +26,7 @@ from .cursor_ext import ExtensionInfo, group_by_family
 from .monitor import (
     KIND_META,
     ProjectSummary,
+    ProcSample,
     ZONE_CLAUDE,
     ZONE_CODEX,
     ZONE_CURSOR,
@@ -181,6 +182,101 @@ def grouped_project_children(session: Session) -> tuple[dict[str, list], list]:
         else:
             helpers.append(child)
     return by_project, helpers
+
+
+# ─── Resource watch ────────────────────────────────────────────────────────
+
+
+def resource_proc_label(proc: ProcSample, width: int = 28) -> str:
+    label = short_proc_label(proc, width=width)
+    if label:
+        return label[:width]
+    if proc.exe:
+        return Path(proc.exe).name[:width]
+    return f"pid {proc.pid}"
+
+
+def cpu_capacity(proc: ProcSample, n_cpus: int | None = None) -> float:
+    logical_cpus = n_cpus or psutil.cpu_count() or 1
+    return proc.cpu_percent / logical_cpus
+
+
+def resource_metric_text(proc: ProcSample, primary: str, compact: bool) -> Text:
+    txt = Text()
+    cpu_pct = cpu_capacity(proc)
+    if primary == "mem":
+        txt.append(compact_size(proc.rss), style=mem_color(proc.rss))
+        txt.append("  ", style=COLOR_DIM)
+        txt.append(f"{cpu_pct:4.1f}%", style=cpu_color(cpu_pct))
+    else:
+        txt.append(f"{cpu_pct:4.1f}%", style=cpu_color(cpu_pct))
+        txt.append("  ", style=COLOR_DIM)
+        txt.append(compact_size(proc.rss), style=mem_color(proc.rss))
+    if not compact:
+        txt.append(f"  pid {proc.pid}", style=COLOR_DIM)
+    return txt
+
+
+def resource_item_text(proc: ProcSample, rank: int, primary: str, compact: bool) -> Text:
+    txt = Text()
+    txt.append(f"{rank}. ", style=COLOR_DIM)
+    txt.append(resource_proc_label(proc, width=18 if compact else 28), style=COLOR_TEXT)
+    txt.append("  ", style=COLOR_DIM)
+    txt.append_text(resource_metric_text(proc, primary, compact))
+    return txt
+
+
+def resource_watch_row_limit(lines: int) -> int:
+    if lines < 26:
+        return 3
+    if lines < 32:
+        return 4
+    return 5
+
+
+def render_resource_watch(procs: dict[int, ProcSample]) -> Panel:
+    columns, lines = shutil.get_terminal_size((120, 24))
+    compact = columns < 150 or lines < 30
+    very_short = lines < 26
+    row_limit = resource_watch_row_limit(lines)
+    all_procs = list(procs.values())
+    top_mem = sorted(all_procs, key=lambda p: (-p.rss, -p.cpu_percent, p.pid))[:row_limit]
+    top_cpu = sorted(all_procs, key=lambda p: (-cpu_capacity(p), -p.rss, p.pid))[:row_limit]
+
+    grid = Table.grid(expand=True, padding=(0, 2 if not compact else 1))
+    grid.add_column(ratio=1)
+    grid.add_column(ratio=1)
+
+    mem_title = Text("Memory Top5" if row_limit == 5 else "Memory leaders", style=f"bold {COLOR_MUTED}")
+    cpu_title = Text("CPU capacity Top5" if row_limit == 5 else "CPU cap leaders", style=f"bold {COLOR_MUTED}")
+    if very_short:
+        mem_title = Text("Memory", style=f"bold {COLOR_MUTED}")
+        cpu_title = Text("CPU cap", style=f"bold {COLOR_MUTED}")
+    grid.add_row(mem_title, cpu_title)
+
+    empty = Text("(no process samples)", style=COLOR_DIM)
+    for i in range(row_limit):
+        mem_cell = (
+            resource_item_text(top_mem[i], i + 1, "mem", compact)
+            if i < len(top_mem)
+            else empty
+        )
+        cpu_cell = (
+            resource_item_text(top_cpu[i], i + 1, "cpu", compact)
+            if i < len(top_cpu)
+            else empty
+        )
+        grid.add_row(mem_cell, cpu_cell)
+
+    return Panel(
+        grid,
+        title=f"[bold {COLOR_MUTED}]Current-user resource watch[/]",
+        subtitle=f"[{COLOR_DIM}]CPU normalized to whole-machine capacity[/]",
+        title_align="left",
+        subtitle_align="right",
+        border_style=COLOR_PANEL,
+        padding=(0, 1),
+    )
 
 
 # ─── Progress bar (inline, monochrome → 3-color gradient) ──────────────────
@@ -642,17 +738,21 @@ def render_footer(refresh_s: float, show_tree: bool, hide_idle: bool, hidden_tot
 
 def render_all(
     sessions: list[Session],
+    procs: dict[int, ProcSample],
     history: History,
     extensions: list[ExtensionInfo],
     refresh_s: float,
     show_tree: bool,
     hide_idle: bool,
 ) -> RenderableType:
-    """Build the full layout: header + 3 zones + footer."""
+    """Build the full layout: header + 3 zones + resource watch + footer."""
+    terminal_lines = shutil.get_terminal_size((120, 24)).lines
+    resource_size = resource_watch_row_limit(terminal_lines) + 3
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=6),
         Layout(name="body", ratio=1),
+        Layout(name="resources", size=resource_size),
         Layout(name="footer", size=1),
     )
     layout["header"].update(render_header(sessions, history, refresh_s, hide_idle))
@@ -666,6 +766,7 @@ def render_all(
     body["codex"].update(render_zone(ZONE_CODEX, sessions, history, show_tree, hide_idle))
     body["cursor"].update(render_zone(ZONE_CURSOR, sessions, history, show_tree, hide_idle, extensions))
     layout["body"].update(body)
+    layout["resources"].update(render_resource_watch(procs))
 
     hidden_total = len(sessions) - len(visible_sessions(sessions, hide_idle)) if hide_idle else 0
     layout["footer"].update(render_footer(refresh_s, show_tree, hide_idle, hidden_total))

@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         procs = sampler.snapshot()
         sessions = build_sessions(procs)
         history.record(sessions)
-        console.print(render_all(sessions, history, extensions, refresh, show_tree, hide_idle))
+        console.print(render_all(sessions, procs, history, extensions, refresh, show_tree, hide_idle))
         return 0
 
     stop = False
@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _sig)
 
     with Live(
-        render_all([], history, extensions, refresh, show_tree, hide_idle),
+        render_all([], {}, history, extensions, refresh, show_tree, hide_idle),
         console=console,
         refresh_per_second=max(1, int(1 / refresh)),
         screen=args.full_screen,
@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             procs = sampler.snapshot()
             sessions = build_sessions(procs)
             history.record(sessions)
-            live.update(render_all(sessions, history, extensions, refresh, show_tree, hide_idle))
+            live.update(render_all(sessions, procs, history, extensions, refresh, show_tree, hide_idle))
             elapsed = time.time() - t0
             time.sleep(max(0.05, refresh - elapsed))
 
