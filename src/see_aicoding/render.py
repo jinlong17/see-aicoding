@@ -12,6 +12,7 @@ import getpass
 import platform
 import shutil
 import socket
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,6 +70,9 @@ PROJECT_PALETTE = (
 MAX_CHILD_ROWS = 12
 MAX_PROJECT_CHILD_ROWS = 5
 IDLE_CPU_THRESHOLD = 0.5
+CHROME_TAB_STATS_TTL_S = 5.0
+CHROME_TAB_STATS_TIMEOUT_S = 1.0
+_chrome_tab_stats_cache: tuple[float, str | None] = (0.0, None)
 
 
 def visible_sessions(sessions: list[Session], hide_idle: bool) -> list[Session]:
@@ -245,6 +249,52 @@ def build_resource_groups(procs: list[ProcSample]) -> list[ResourceGroup]:
     return list(groups.values())
 
 
+def chrome_tab_stats() -> str | None:
+    if platform.system() != "Darwin":
+        return None
+    global _chrome_tab_stats_cache
+    now = time.monotonic()
+    cached_at, cached_value = _chrome_tab_stats_cache
+    if cached_at > 0 and now - cached_at < CHROME_TAB_STATS_TTL_S:
+        return cached_value
+
+    script = """
+if application "Google Chrome" is not running then return ""
+tell application "Google Chrome"
+    set windowCount to count of windows
+    set tabCount to 0
+    repeat with chromeWindow in windows
+        set tabCount to tabCount + (count of tabs of chromeWindow)
+    end repeat
+    return (windowCount as text) & "w/" & (tabCount as text) & "t"
+end tell
+""".strip()
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=CHROME_TAB_STATS_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        _chrome_tab_stats_cache = (now, None)
+        return None
+
+    value = result.stdout.strip() if result.returncode == 0 else ""
+    _chrome_tab_stats_cache = (now, value or None)
+    return _chrome_tab_stats_cache[1]
+
+
+def resource_group_detail(group: ResourceGroup) -> str:
+    detail = f"{group.proc_count}p" if group.proc_count > 1 else f"pid {group.primary_pid}"
+    if group.label == "Google Chrome":
+        tab_stats = chrome_tab_stats()
+        if tab_stats:
+            return f"{detail} {tab_stats}"
+    return detail
+
+
 def resource_proc_label(proc: ProcSample, width: int = 28) -> str:
     label = short_proc_label(proc, width=width)
     if label:
@@ -330,8 +380,7 @@ def resource_item_text(
         txt.append(" ", style=COLOR_DIM)
         txt.append(f"{compact_size(group.rss):>5}", style=mem_color(group.rss))
     if not compact and not very_short:
-        detail = f"{group.proc_count}p" if group.proc_count > 1 else f"pid {group.primary_pid}"
-        txt.append(f"  {detail}", style=COLOR_DIM)
+        txt.append(f"  {resource_group_detail(group)}", style=COLOR_DIM)
     return txt
 
 

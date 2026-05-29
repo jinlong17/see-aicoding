@@ -38,7 +38,7 @@ Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child proce
 ╭─ Current-user resource watch ──────────────────────────────────────────────╮
 │ ● Memory Top5  RSS  CPU            ● CPU capacity Top5  CAP  MEM         │
 │ #1  Claude        ━━━━━━━ 1.8G  5.1%  #1  Codex       ━━━━━━━ 26% 740M   │
-│ #2  Google Chrome ━━━━━── 1.1G  1.0%  #2  node        ━━━──── 12% 318M   │
+│ #2  Google Chrome ━━━━━── 1.1G  1.0% 14p 3w/48t  #2 node ━━━── 12% 318M  │
 ╰──────────────────────── CPU cap = process CPU / logical cores ────────────╯
 ```
 
@@ -65,7 +65,7 @@ When several AI coding tools are open at once, the expensive process is often hi
 | Stable ordering | Sessions sort by creation time, so rows do not jump around when CPU changes |
 | Per-project totals | Process count, processor usage, and memory per detected project |
 | System context | Time, network throughput, system processor, system memory, and local storage |
-| Resource watch | Current-user app/process-group Memory Top5 by summed RSS and CPU Top5 normalized to whole-machine capacity |
+| Resource watch | Current-user app/process-group Memory Top5 by summed RSS and CPU Top5 normalized to whole-machine capacity, with Chrome tab counts on macOS when permitted |
 | Extension inventory | Installed Cursor / VS Code AI extensions with version and host |
 
 ## Install
@@ -173,6 +173,7 @@ Sampling flow:
 - macOS resident memory includes shared library pages, so Electron/V8 memory can read higher than private working set.
 - AI processor capacity is normalized to all CPU cores; the total value is the summed per-process CPU percentage.
 - Resource watch groups app helper processes together, sums each group's RSS and CPU percentage, then divides CPU by logical CPU count so it is comparable with the header capacity bars.
+- On macOS, Google Chrome rows can append `Nw/Mt` window and tab counts via AppleScript when the terminal has permission to query Chrome; failures are hidden so monitoring keeps working.
 - System memory uses `total - available`, so the displayed size and percentage share the same pressure-oriented basis.
 - Network speed is sampled from OS network counters, so it shows current machine traffic, not per-AI-process traffic.
 - Pure extension API activity cannot always be separated from the Cursor Extension Host process.
