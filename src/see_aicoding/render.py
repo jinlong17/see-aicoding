@@ -208,7 +208,13 @@ class ResourceGroup:
 
     @property
     def primary_pid(self) -> int:
-        return min(p.pid for p in self.procs)
+        roots = resource_group_roots(self)
+        primary = (
+            max(roots, key=lambda p: (p.rss, -p.pid))
+            if roots
+            else min(self.procs, key=lambda p: p.pid)
+        )
+        return primary.pid
 
     @property
     def proc_count(self) -> int:
@@ -247,6 +253,25 @@ def build_resource_groups(procs: list[ProcSample]) -> list[ResourceGroup]:
         group = groups.setdefault(key, ResourceGroup(key=key, label=label, procs=[]))
         group.procs.append(proc)
     return list(groups.values())
+
+
+def _is_crashpad(proc: ProcSample) -> bool:
+    return "chrome_crashpad_handler" in proc.cmdline_str or "crashpad" in proc.name.lower()
+
+
+def resource_group_roots(group: ResourceGroup) -> list[ProcSample]:
+    if not group.procs:
+        return []
+
+    named_roots = [proc for proc in group.procs if proc.name == group.label]
+    if named_roots:
+        return sorted(named_roots, key=lambda p: p.pid)
+
+    pids = {proc.pid for proc in group.procs}
+    roots = [proc for proc in group.procs if proc.ppid not in pids and not _is_crashpad(proc)]
+    if roots:
+        return sorted(roots, key=lambda p: p.pid)
+    return [min(group.procs, key=lambda p: p.pid)]
 
 
 def chrome_tab_stats() -> str | None:
@@ -289,19 +314,20 @@ end tell
         except (TypeError, ValueError):
             value = ""
         else:
-            window_label = "window" if window_count == 1 else "windows"
-            tab_label = "tab" if tab_count == 1 else "tabs"
-            value = f"{window_count} {window_label} / {tab_count} {tab_label}"
+            value = f"Chrome UI {window_count}w / {tab_count}t"
     _chrome_tab_stats_cache = (now, value or None)
     return _chrome_tab_stats_cache[1]
 
 
 def resource_group_detail(group: ResourceGroup) -> str:
-    detail = f"{group.proc_count}p" if group.proc_count > 1 else f"pid {group.primary_pid}"
+    detail = f"{group.proc_count} procs" if group.proc_count > 1 else f"pid {group.primary_pid}"
+    root_count = len(resource_group_roots(group))
+    if group.proc_count > 1 and root_count > 1:
+        detail = f"{detail} · {root_count} roots"
     if group.label == "Google Chrome":
         tab_stats = chrome_tab_stats()
         if tab_stats:
-            return f"{detail} {tab_stats}"
+            return f"{detail} · {tab_stats}"
     return detail
 
 
