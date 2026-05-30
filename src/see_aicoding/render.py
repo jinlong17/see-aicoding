@@ -314,7 +314,11 @@ end tell
         except (TypeError, ValueError):
             value = ""
         else:
-            value = f"Chrome UI {window_count}w / {tab_count}t"
+            value = (
+                "no visible Chrome windows"
+                if window_count == 0 and tab_count == 0
+                else f"Chrome UI {window_count}w / {tab_count}t"
+            )
     _chrome_tab_stats_cache = (now, value or None)
     return _chrome_tab_stats_cache[1]
 
