@@ -72,6 +72,7 @@ MAX_PROJECT_CHILD_ROWS = 5
 IDLE_CPU_THRESHOLD = 0.5
 CHROME_TAB_STATS_TTL_S = 5.0
 CHROME_TAB_STATS_TIMEOUT_S = 1.0
+CHROME_ACCESSIBILITY_STATS_TIMEOUT_S = 2.0
 _chrome_tab_stats_cache: tuple[float, str | None] = (0.0, None)
 
 
@@ -274,15 +275,23 @@ def resource_group_roots(group: ResourceGroup) -> list[ProcSample]:
     return [min(group.procs, key=lambda p: p.pid)]
 
 
-def chrome_tab_stats() -> str | None:
-    if platform.system() != "Darwin":
+def _parse_chrome_counts(raw_value: str) -> tuple[int, int] | None:
+    try:
+        window_count, tab_count = [int(part) for part in raw_value.strip().split("|", 1)]
+    except (TypeError, ValueError):
         return None
-    global _chrome_tab_stats_cache
-    now = time.monotonic()
-    cached_at, cached_value = _chrome_tab_stats_cache
-    if cached_at > 0 and now - cached_at < CHROME_TAB_STATS_TTL_S:
-        return cached_value
+    return window_count, tab_count
 
+
+def _format_chrome_ui_stats(window_count: int, tab_count: int) -> str:
+    if window_count == 0 and tab_count == 0:
+        return "no visible Chrome windows"
+    if tab_count == 0:
+        return f"Chrome UI {window_count}w"
+    return f"Chrome UI {window_count}w / {tab_count}t"
+
+
+def _chrome_script_stats() -> tuple[int, int] | None:
     script = """
 if application "Google Chrome" is not running then return ""
 tell application "Google Chrome"
@@ -303,22 +312,68 @@ end tell
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        _chrome_tab_stats_cache = (now, None)
         return None
+    if result.returncode != 0:
+        return None
+    return _parse_chrome_counts(result.stdout)
 
-    value = ""
-    if result.returncode == 0:
-        raw_value = result.stdout.strip()
-        try:
-            window_count, tab_count = [int(part) for part in raw_value.split("|", 1)]
-        except (TypeError, ValueError):
-            value = ""
-        else:
-            value = (
-                "no visible Chrome windows"
-                if window_count == 0 and tab_count == 0
-                else f"Chrome UI {window_count}w / {tab_count}t"
-            )
+
+def _chrome_accessibility_stats() -> tuple[int, int] | None:
+    # Multiple Chrome roots/profiles can make "tell application" point at an
+    # instance with no scriptable windows. System Events sees the frontmost UI.
+    script = """
+tell application "System Events"
+    set chromeProcesses to processes whose name is "Google Chrome"
+    if (count of chromeProcesses) is 0 then return ""
+    set windowCount to 0
+    set tabCount to 0
+    set seenPids to {}
+    repeat with chromeProcess in chromeProcesses
+        try
+            set chromePid to unix id of chromeProcess
+            if seenPids contains chromePid then error "duplicate Chrome process"
+            set end of seenPids to chromePid
+            set processWindowCount to count of windows of chromeProcess
+            set windowCount to windowCount + processWindowCount
+            repeat with chromeWindow in windows of chromeProcess
+                try
+                    set tabContainer to UI element 1 of UI element 1 of tab group 1 of UI element 1 of UI element 3 of UI element 2 of chromeWindow
+                    set tabCount to tabCount + (count of (UI elements of tabContainer whose role is "AXRadioButton"))
+                end try
+            end repeat
+        end try
+    end repeat
+    return (windowCount as text) & "|" & (tabCount as text)
+end tell
+""".strip()
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=CHROME_ACCESSIBILITY_STATS_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return _parse_chrome_counts(result.stdout)
+
+
+def chrome_tab_stats() -> str | None:
+    if platform.system() != "Darwin":
+        return None
+    global _chrome_tab_stats_cache
+    now = time.monotonic()
+    cached_at, cached_value = _chrome_tab_stats_cache
+    if cached_at > 0 and now - cached_at < CHROME_TAB_STATS_TTL_S:
+        return cached_value
+
+    counts = _chrome_script_stats()
+    if counts == (0, 0):
+        counts = _chrome_accessibility_stats() or counts
+    value = _format_chrome_ui_stats(*counts) if counts else ""
     _chrome_tab_stats_cache = (now, value or None)
     return _chrome_tab_stats_cache[1]
 
