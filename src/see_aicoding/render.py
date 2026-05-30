@@ -286,9 +286,11 @@ def _parse_chrome_counts(raw_value: str) -> tuple[int, int] | None:
 def _format_chrome_ui_stats(window_count: int, tab_count: int) -> str:
     if window_count == 0 and tab_count == 0:
         return "no visible Chrome windows"
+    window_label = "window" if window_count == 1 else "windows"
+    tab_label = "tab" if tab_count == 1 else "tabs"
     if tab_count == 0:
-        return f"Chrome UI {window_count}w"
-    return f"Chrome UI {window_count}w / {tab_count}t"
+        return f"Chrome UI {window_count} {window_label}"
+    return f"Chrome UI {window_count} {window_label} / {tab_count} {tab_label}"
 
 
 def _chrome_script_stats() -> tuple[int, int] | None:
@@ -371,7 +373,7 @@ def chrome_tab_stats() -> str | None:
         return cached_value
 
     counts = _chrome_script_stats()
-    if counts == (0, 0):
+    if counts is None or counts == (0, 0):
         counts = _chrome_accessibility_stats() or counts
     value = _format_chrome_ui_stats(*counts) if counts else ""
     _chrome_tab_stats_cache = (now, value or None)
