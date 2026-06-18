@@ -1,9 +1,11 @@
 """Local web monitor for see-aicoding."""
 from __future__ import annotations
 
+import errno
 import json
 import mimetypes
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -169,12 +171,92 @@ def _validate_loopback_host(host: str) -> None:
         raise ValueError("web monitor only binds to localhost addresses")
 
 
+def _host_matches_listener(host: str, listener_host: str) -> bool:
+    if host == "localhost":
+        return listener_host in {"127.0.0.1", "::1", "localhost"}
+    return host == listener_host
+
+
+def _command_for_pid(pid: int) -> str | None:
+    try:
+        return " ".join(psutil.Process(pid).cmdline())
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.Error):
+        return None
+
+
+def _find_listener_command_with_psutil(host: str, port: int) -> str | None:
+    connections = psutil.net_connections(kind="tcp")
+    for conn in connections:
+        if conn.status != psutil.CONN_LISTEN or not conn.laddr:
+            continue
+        listener_host = getattr(conn.laddr, "ip", None)
+        listener_port = getattr(conn.laddr, "port", None)
+        if (
+            listener_port != port
+            or not listener_host
+            or not _host_matches_listener(host, listener_host)
+        ):
+            continue
+        if conn.pid is None:
+            return None
+        return _command_for_pid(conn.pid)
+    return None
+
+
+def _find_listener_command_with_lsof(port: int) -> str | None:
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"],
+            capture_output=True,
+            text=True,
+            timeout=1,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if not line.startswith("p"):
+            continue
+        try:
+            pid = int(line[1:])
+        except ValueError:
+            continue
+        command = _command_for_pid(pid)
+        if command:
+            return command
+    return None
+
+
+def _find_loopback_listener_command(host: str, port: int) -> str | None:
+    try:
+        command = _find_listener_command_with_psutil(host, port)
+    except (psutil.AccessDenied, psutil.Error):
+        command = None
+    return command or _find_listener_command_with_lsof(port)
+
+
+def _is_existing_see_aicoding_web(command: str | None) -> bool:
+    return bool(command and "see-aicoding" in command and "--web" in command)
+
+
 def run_web_server(host: str, port: int, refresh_s: float, open_browser: bool) -> int:
     _validate_loopback_host(host)
-    state = MonitorState(refresh_s)
-    server = WebMonitorServer((host, port), WebMonitorHandler, state)
     url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
     url = f"http://{url_host}:{port}/"
+    state = MonitorState(refresh_s)
+    try:
+        server = WebMonitorServer((host, port), WebMonitorHandler, state)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE and _is_existing_see_aicoding_web(
+            _find_loopback_listener_command(host, port)
+        ):
+            print(f"see-aicoding web monitor is already running: {url}")
+            if open_browser:
+                webbrowser.open(url)
+            return 0
+        raise
     stop = False
 
     def _sig(_n, _f):
