@@ -23,6 +23,7 @@ from typing import Any
 import psutil
 
 from .monitor import ProcSample
+from .storage import SmartCollector
 
 
 GPU_SAMPLE_TIMEOUT_S = 1.0
@@ -351,6 +352,7 @@ class SystemTelemetry:
     def __init__(self, maxlen: int = 60) -> None:
         self.maxlen = maxlen
         self.gpu = GpuCollector()
+        self.smart = SmartCollector()
         self.history: dict[str, deque[float]] = {
             key: deque(maxlen=maxlen)
             for key in (
@@ -359,11 +361,16 @@ class SystemTelemetry:
                 "gpu_percent",
                 "disk_read_bytes_per_s",
                 "disk_write_bytes_per_s",
+                "disk_read_iops",
+                "disk_write_iops",
+                "disk_read_latency_ms",
+                "disk_write_latency_ms",
                 "network_download_bytes_per_s",
                 "network_upload_bytes_per_s",
             )
         }
-        self._last_disk: tuple[int, int, float] | None = None
+        self._last_disk: tuple[dict[str, float], float] | None = None
+        self._last_disk_devices: dict[str, dict[str, float]] = {}
         psutil.cpu_percent(interval=None)
         psutil.cpu_percent(interval=None, percpu=True)
         self._prime_disk()
@@ -371,27 +378,112 @@ class SystemTelemetry:
     def _prime_disk(self) -> None:
         try:
             counters = psutil.disk_io_counters()
+            device_counters = psutil.disk_io_counters(perdisk=True) or {}
         except (OSError, RuntimeError):
             counters = None
         if counters is not None:
-            self._last_disk = (counters.read_bytes, counters.write_bytes, time.monotonic())
+            self._last_disk = (self._disk_counter_values(counters), time.monotonic())
+            self._last_disk_devices = {
+                name: self._disk_counter_values(counter)
+                for name, counter in device_counters.items()
+            }
 
-    def _disk_rates(self) -> tuple[float, float]:
+    @staticmethod
+    def _disk_counter_values(counter: Any) -> dict[str, float]:
+        return {
+            "read_count": float(getattr(counter, "read_count", 0) or 0),
+            "write_count": float(getattr(counter, "write_count", 0) or 0),
+            "read_bytes": float(getattr(counter, "read_bytes", 0) or 0),
+            "write_bytes": float(getattr(counter, "write_bytes", 0) or 0),
+            "read_time": float(getattr(counter, "read_time", 0) or 0),
+            "write_time": float(getattr(counter, "write_time", 0) or 0),
+        }
+
+    @staticmethod
+    def _disk_counter_rates(
+        current: dict[str, float],
+        previous: dict[str, float] | None,
+        elapsed: float,
+    ) -> dict[str, float]:
+        if previous is None:
+            return {
+                "read_bytes_per_s": 0.0,
+                "write_bytes_per_s": 0.0,
+                "read_iops": 0.0,
+                "write_iops": 0.0,
+                "read_latency_ms": 0.0,
+                "write_latency_ms": 0.0,
+            }
+        deltas = {
+            key: max(0.0, current[key] - previous.get(key, current[key]))
+            for key in current
+        }
+        read_ops = deltas["read_count"]
+        write_ops = deltas["write_count"]
+        return {
+            "read_bytes_per_s": deltas["read_bytes"] / elapsed,
+            "write_bytes_per_s": deltas["write_bytes"] / elapsed,
+            "read_iops": read_ops / elapsed,
+            "write_iops": write_ops / elapsed,
+            # psutil normalizes disk read/write time to milliseconds.
+            "read_latency_ms": deltas["read_time"] / read_ops if read_ops else 0.0,
+            "write_latency_ms": deltas["write_time"] / write_ops if write_ops else 0.0,
+        }
+
+    def _disk_rates(self) -> dict[str, Any]:
         try:
             counters = psutil.disk_io_counters()
+            device_counters = psutil.disk_io_counters(perdisk=True) or {}
         except (OSError, RuntimeError):
             counters = None
         if counters is None:
-            return 0.0, 0.0
+            return {
+                "read_bytes_per_s": 0.0,
+                "write_bytes_per_s": 0.0,
+                "read_iops": 0.0,
+                "write_iops": 0.0,
+                "read_latency_ms": 0.0,
+                "write_latency_ms": 0.0,
+                "devices": [],
+            }
         now = time.monotonic()
-        read_rate = 0.0
-        write_rate = 0.0
-        if self._last_disk is not None:
-            elapsed = max(0.001, now - self._last_disk[2])
-            read_rate = max(0, counters.read_bytes - self._last_disk[0]) / elapsed
-            write_rate = max(0, counters.write_bytes - self._last_disk[1]) / elapsed
-        self._last_disk = (counters.read_bytes, counters.write_bytes, now)
-        return read_rate, write_rate
+        elapsed = max(0.001, now - self._last_disk[1]) if self._last_disk else 1.0
+        current = self._disk_counter_values(counters)
+        rates = self._disk_counter_rates(
+            current,
+            self._last_disk[0] if self._last_disk else None,
+            elapsed,
+        )
+        device_values = {
+            name: self._disk_counter_values(counter)
+            for name, counter in device_counters.items()
+        }
+        devices = []
+        for name, values in device_values.items():
+            device_rates = self._disk_counter_rates(
+                values,
+                self._last_disk_devices.get(name),
+                elapsed,
+            )
+            devices.append(
+                {
+                    "device": name,
+                    **device_rates,
+                    "read_count": int(values["read_count"]),
+                    "write_count": int(values["write_count"]),
+                    "read_bytes": int(values["read_bytes"]),
+                    "write_bytes": int(values["write_bytes"]),
+                }
+            )
+        self._last_disk = (current, now)
+        self._last_disk_devices = device_values
+        rates["devices"] = sorted(
+            devices,
+            key=lambda item: -(
+                item["read_bytes_per_s"] + item["write_bytes_per_s"]
+            ),
+        )
+        return rates
 
     def _disks(self) -> list[dict[str, Any]]:
         disks: list[dict[str, Any]] = []
@@ -510,7 +602,9 @@ class SystemTelemetry:
         memory_used = max(0, vm.total - vm.available)
         memory_percent = memory_used / vm.total * 100.0 if vm.total else 0.0
         gpu = self.gpu.sample(vm.total)
-        disk_read_rate, disk_write_rate = self._disk_rates()
+        disk_io = self._disk_rates()
+        disks = self._disks()
+        storage_health = self.smart.sample(disks)
         statuses = Counter(proc.status for proc in procs.values())
         current_user = getpass.getuser()
 
@@ -518,8 +612,12 @@ class SystemTelemetry:
             "cpu_percent": cpu_percent,
             "memory_percent": memory_percent,
             "gpu_percent": _number(gpu.get("utilization_percent"), 0.0),
-            "disk_read_bytes_per_s": disk_read_rate,
-            "disk_write_bytes_per_s": disk_write_rate,
+            "disk_read_bytes_per_s": disk_io["read_bytes_per_s"],
+            "disk_write_bytes_per_s": disk_io["write_bytes_per_s"],
+            "disk_read_iops": disk_io["read_iops"],
+            "disk_write_iops": disk_io["write_iops"],
+            "disk_read_latency_ms": disk_io["read_latency_ms"],
+            "disk_write_latency_ms": disk_io["write_latency_ms"],
             "network_download_bytes_per_s": download_bytes_per_s,
             "network_upload_bytes_per_s": upload_bytes_per_s,
         }
@@ -577,11 +675,9 @@ class SystemTelemetry:
                 "percent": swap.percent,
             },
             "gpu": gpu,
-            "disks": self._disks(),
-            "disk_io": {
-                "read_bytes_per_s": disk_read_rate,
-                "write_bytes_per_s": disk_write_rate,
-            },
+            "disks": disks,
+            "disk_io": disk_io,
+            "storage_health": storage_health,
             "network": {
                 "download_bytes_per_s": download_bytes_per_s,
                 "upload_bytes_per_s": upload_bytes_per_s,

@@ -141,6 +141,37 @@ def _process_list_item(
     }
 
 
+def _process_tree_metadata(procs: list[ProcSample]) -> dict[str, Any]:
+    by_pid = {proc.pid: proc for proc in procs}
+    roots = sorted(
+        proc.pid
+        for proc in procs
+        if proc.ppid not in by_pid or proc.ppid == proc.pid
+    )
+    depth_cache: dict[int, int] = {}
+
+    def depth(pid: int, trail: set[int] | None = None) -> int:
+        if pid in depth_cache:
+            return depth_cache[pid]
+        trail = set() if trail is None else trail
+        if pid in trail:
+            return 1
+        proc = by_pid.get(pid)
+        if proc is None or proc.ppid not in by_pid or proc.ppid == pid:
+            result = 1
+        else:
+            result = 1 + depth(proc.ppid, {*trail, pid})
+        depth_cache[pid] = result
+        return result
+
+    return {
+        "root_pids": roots,
+        "root_count": len(roots),
+        "edge_count": sum(proc.ppid in by_pid and proc.ppid != proc.pid for proc in procs),
+        "max_depth": max((depth(proc.pid) for proc in procs), default=0),
+    }
+
+
 def _project_to_dict(project: ProjectSummary) -> dict[str, Any]:
     return {
         "name": project.name,
@@ -329,6 +360,7 @@ def build_snapshot(
     extensions: list[ExtensionInfo],
     refresh_s: float,
     system_metrics: dict[str, Any] | None = None,
+    observability: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a browser-friendly snapshot from monitor samples."""
     now = time.time()
@@ -392,7 +424,20 @@ def build_snapshot(
             "swap": {},
             "gpu": gpu,
             "disks": [disk] if disk else [],
-            "disk_io": {"read_bytes_per_s": 0.0, "write_bytes_per_s": 0.0},
+            "disk_io": {
+                "read_bytes_per_s": 0.0,
+                "write_bytes_per_s": 0.0,
+                "read_iops": 0.0,
+                "write_iops": 0.0,
+                "read_latency_ms": 0.0,
+                "write_latency_ms": 0.0,
+                "devices": [],
+            },
+            "storage_health": {
+                "available": False,
+                "provider": "none",
+                "devices": [],
+            },
             "network": {
                 "download_bytes_per_s": history.net_recv_per_s,
                 "upload_bytes_per_s": history.net_sent_per_s,
@@ -412,7 +457,7 @@ def build_snapshot(
 
     total_history = list(history.total_cpu)
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": now,
         "generated_at_iso": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now)),
         "refresh_interval": refresh_s,
@@ -449,6 +494,7 @@ def build_snapshot(
         ],
         "processes": {
             "scope": "system",
+            "tree": _process_tree_metadata(all_procs),
             "items": [
                 _process_list_item(
                     proc,
@@ -476,6 +522,12 @@ def build_snapshot(
             ],
             "top_disk": top_disk,
             "top_gpu": top_gpu,
+        },
+        "observability": observability or {
+            "summary": {"active": 0, "critical": 0, "warning": 0},
+            "thresholds": {},
+            "active": [],
+            "events": [],
         },
         "extensions": [_extension_to_dict(ext) for ext in extensions],
     }

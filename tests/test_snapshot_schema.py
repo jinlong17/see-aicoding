@@ -5,7 +5,7 @@ from see_aicoding.snapshot import build_snapshot
 
 
 class SystemSnapshotSchemaTests(unittest.TestCase):
-    def test_schema_v2_exposes_processes_programs_and_hardware(self):
+    def test_schema_v3_exposes_processes_programs_hardware_and_events(self):
         proc = ProcSample(
             pid=1234,
             ppid=1,
@@ -71,13 +71,16 @@ class SystemSnapshotSchemaTests(unittest.TestCase):
             system_metrics=system_metrics,
         )
 
-        self.assertEqual(snapshot["schema_version"], 2)
+        self.assertEqual(snapshot["schema_version"], 3)
         self.assertEqual(snapshot["system"]["cpu_percent"], 42)
         self.assertEqual(snapshot["system"]["disk"]["id"], "root")
         self.assertEqual(snapshot["processes"]["scope"], "system")
+        self.assertEqual(snapshot["processes"]["tree"]["root_pids"], [1234])
+        self.assertEqual(snapshot["processes"]["tree"]["max_depth"], 1)
         self.assertEqual(snapshot["processes"]["items"][0]["gpu_percent"], 7)
         self.assertEqual(snapshot["resources"]["programs"][0]["process_count"], 1)
         self.assertEqual(snapshot["resources"]["programs"][0]["read_bytes_per_s"], 1024)
+        self.assertIn("observability", snapshot)
 
 
 if __name__ == "__main__":

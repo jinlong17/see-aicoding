@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "see-aicoding"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local system resource dashboard with AI coding workload context for macOS and Linux."
 readme = "README.md"
 requires-python = ">=3.9"

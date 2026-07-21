@@ -15,6 +15,16 @@ const state = {
   selectedDetail: null,
   eventSource: null,
   fallbackTimer: null,
+  thresholdRenderSignature: "",
+  historyRange: "1h",
+  historyModel: null,
+  historyRequest: 0,
+  services: null,
+  serviceQuery: "",
+  networkAttribution: null,
+  runtimeTimer: null,
+  containers: null,
+  containerTimer: null,
 };
 
 const el = Object.fromEntries(
@@ -29,7 +39,16 @@ const el = Object.fromEntries(
     "topCpu", "topMemory", "topGpu", "processSummary", "processTotal", "processRunning",
     "processSearch", "processScope", "processStatus", "processTableHead", "processTableBody",
     "visibleProcessCount", "showMoreProcesses", "storageReadRate", "storageWriteRate",
-    "diskGrid", "diskIoChart", "sensorList", "aiTotals", "aiZones", "detailsDrawer",
+    "storageIops", "storageLatency", "diskGrid", "diskIoChart", "sensorList",
+    "smartProvider", "smartDeviceList", "deviceIoList", "aiTotals", "aiZones", "detailsDrawer",
+    "alertBadge", "alertSummary", "activeAlerts", "thresholdGrid", "saveThresholds",
+    "eventCount", "eventTimeline", "persistentHistoryChart", "persistenceFacts",
+    "runtimeSummary", "servicesProvider", "servicesNote", "serviceSearch",
+    "refreshServices", "serviceTableBody", "serviceVisibleCount",
+    "networkProvider", "networkSummary", "networkNote", "refreshNetwork",
+    "networkTableBody", "networkVisibleCount",
+    "containerProvider", "containerSummary", "containerNote", "refreshContainers",
+    "containerGrid",
     "drawerScrim", "detailsTitle", "detailsBody", "closeDetails", "toast",
   ].map((id) => [id, document.getElementById(id)])
 );
@@ -92,6 +111,14 @@ function formatDuration(seconds) {
   if (hours) return `${hours}小时 ${minutes}分`;
   if (minutes) return `${minutes}分 ${remaining % 60}秒`;
   return `${remaining}秒`;
+}
+
+function formatEventTime(timestamp) {
+  const date = new Date(Number(timestamp || 0) * 1000);
+  if (Number.isNaN(date.getTime())) return "--";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).format(date);
 }
 
 function clamp(value, min = 0, max = 100) {
@@ -230,6 +257,31 @@ function setView(view) {
     else button.removeAttribute("aria-current");
   });
   if (state.snapshot) renderCurrentView();
+  if (view === "events") fetchHistory(state.historyRange);
+  if (view === "runtime" && !state.services) fetchServices();
+  if (view === "runtime") {
+    if (!state.containers) fetchContainers();
+    fetchNetwork(Boolean(state.networkAttribution));
+    if (!state.runtimeTimer) {
+      state.runtimeTimer = window.setInterval(() => {
+        if (state.view === "runtime" && !state.paused) fetchNetwork(true);
+      }, 4000);
+    }
+    if (!state.containerTimer) {
+      state.containerTimer = window.setInterval(() => {
+        if (state.view === "runtime" && !state.paused) fetchContainers(true);
+      }, 8000);
+    }
+  } else {
+    if (state.runtimeTimer) {
+      window.clearInterval(state.runtimeTimer);
+      state.runtimeTimer = null;
+    }
+    if (state.containerTimer) {
+      window.clearInterval(state.containerTimer);
+      state.containerTimer = null;
+    }
+  }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -404,7 +456,7 @@ function renderProcessHead(mode) {
     </tr>`;
   }
   return `<tr>
-    <th style="width:25%">${sortButton("name", "进程")}</th>
+    <th style="width:25%">${sortButton("name", mode === "tree" ? "进程树" : "进程")}</th>
     <th style="width:8%">${sortButton("pid", "PID")}</th>
     <th style="width:11%">用户</th>
     <th style="width:10%">状态</th>
@@ -438,13 +490,14 @@ function renderProgramRow(item) {
   </tr>`;
 }
 
-function renderProcessRow(item) {
+function renderProcessRow(item, treeDepth = null, hasChildren = false) {
   const ioRate = Number(item.read_bytes_per_s || 0) + Number(item.write_bytes_per_s || 0);
   const gpuLabel = item.gpu_percent !== null && item.gpu_percent !== undefined
     ? formatPct(item.gpu_percent)
     : item.gpu_memory_bytes ? formatBytes(item.gpu_memory_bytes) : "--";
-  return `<tr class="process-row" data-pid="${Number(item.pid || 0)}" tabindex="0">
-    <td title="${escapeHtml(item.cmdline || "")}"><div class="process-name-cell"><span class="process-avatar">${escapeHtml(initials(item.label || item.name))}</span><span class="process-name">${escapeHtml(item.label || item.name || `PID ${item.pid}`)}<span class="process-sub">${escapeHtml(item.cmdline || item.exe || "无命令信息")}</span></span></div></td>
+  const treePrefix = treeDepth === null ? "" : `<span class="tree-indent" style="--tree-depth:${Math.min(12, treeDepth)}"><i>${hasChildren ? "⌄" : "·"}</i></span>`;
+  return `<tr class="process-row ${treeDepth === null ? "" : "tree-row"}" data-pid="${Number(item.pid || 0)}" tabindex="0">
+    <td title="${escapeHtml(item.cmdline || "")}"><div class="process-name-cell">${treePrefix}<span class="process-avatar">${escapeHtml(initials(item.label || item.name))}</span><span class="process-name">${escapeHtml(item.label || item.name || `PID ${item.pid}`)}<span class="process-sub">${treeDepth === null ? "" : `PPID ${Number(item.ppid || 0)} · `}${escapeHtml(item.cmdline || item.exe || "无命令信息")}</span></span></div></td>
     <td class="mono">${Number(item.pid || 0)}</td>
     <td title="${escapeHtml(item.username || "")}">${escapeHtml(item.username || "--")}</td>
     <td><span class="status-badge status-${escapeHtml(item.status || "unknown")}">${escapeHtml(statusLabel(item.status))}</span></td>
@@ -456,37 +509,82 @@ function renderProcessRow(item) {
   </tr>`;
 }
 
+function processTreeRows(items) {
+  const byPid = new Map(items.map((item) => [Number(item.pid), item]));
+  const matched = new Set(items.filter((item) =>
+    processSearchMatch(item, "tree") && processScopeMatch(item, "tree") && processStatusMatch(item, "tree")
+  ).map((item) => Number(item.pid)));
+  const included = new Set(matched);
+  for (const pid of matched) {
+    let cursor = byPid.get(pid);
+    const trail = new Set([pid]);
+    while (cursor && byPid.has(Number(cursor.ppid)) && !trail.has(Number(cursor.ppid))) {
+      const parentPid = Number(cursor.ppid);
+      included.add(parentPid);
+      trail.add(parentPid);
+      cursor = byPid.get(parentPid);
+    }
+  }
+  const children = new Map();
+  for (const pid of included) {
+    const item = byPid.get(pid);
+    if (!item) continue;
+    const parentPid = Number(item.ppid);
+    if (!children.has(parentPid)) children.set(parentPid, []);
+    children.get(parentPid).push(item);
+  }
+  const roots = [...included]
+    .map((pid) => byPid.get(pid))
+    .filter((item) => item && (!included.has(Number(item.ppid)) || Number(item.ppid) === Number(item.pid)));
+  const rows = [];
+  const visited = new Set();
+  function visit(item, depth) {
+    const pid = Number(item.pid);
+    if (visited.has(pid)) return;
+    visited.add(pid);
+    const childItems = sortedProcessItems(children.get(pid) || [], "tree");
+    rows.push({ item, depth, hasChildren: childItems.length > 0 });
+    childItems.forEach((child) => visit(child, depth + 1));
+  }
+  sortedProcessItems(roots, "tree").forEach((root) => visit(root, 0));
+  return rows;
+}
+
 function renderProcesses(snapshot) {
   const mode = state.processMode;
   const source = mode === "programs" ? snapshot.resources?.programs || [] : snapshot.processes?.items || [];
-  const filtered = sortedProcessItems(source.filter((item) =>
+  const filtered = mode === "tree" ? processTreeRows(source) : sortedProcessItems(source.filter((item) =>
     processSearchMatch(item, mode) && processScopeMatch(item, mode) && processStatusMatch(item, mode)
   ), mode);
   const visible = filtered.slice(0, state.processLimit);
   const summary = snapshot.system?.process_summary || {};
+  const tree = snapshot.processes?.tree || {};
 
-  el.processSummary.textContent = mode === "programs"
-    ? `${formatNumber(source.length)} 个程序组，辅助进程已按应用归并。`
+  el.processSummary.textContent = mode === "programs" ? `${formatNumber(source.length)} 个程序组，辅助进程已按应用归并。`
+    : mode === "tree" ? `${formatNumber(tree.root_count || 0)} 个根节点 · 最大 ${formatNumber(tree.max_depth || 0)} 层；筛选结果会保留父级上下文。`
     : `${formatNumber(source.length)} 个可读取进程，点击任意行查看完整资源详情。`;
   el.processTotal.textContent = formatNumber(summary.total || snapshot.processes?.items?.length || 0);
   el.processRunning.textContent = formatNumber(summary.running || 0);
   el.processTableHead.innerHTML = renderProcessHead(mode);
   el.processTableBody.innerHTML = visible.length
-    ? visible.map((item) => mode === "programs" ? renderProgramRow(item) : renderProcessRow(item)).join("")
+    ? visible.map((row) => mode === "programs" ? renderProgramRow(row) : mode === "tree" ? renderProcessRow(row.item, row.depth, row.hasChildren) : renderProcessRow(row)).join("")
     : `<tr><td colspan="9"><div class="empty-state">没有匹配当前筛选条件的${mode === "programs" ? "程序" : "进程"}</div></td></tr>`;
   el.visibleProcessCount.textContent = `显示 ${formatNumber(visible.length)} / ${formatNumber(filtered.length)}`;
   el.showMoreProcesses.hidden = visible.length >= filtered.length;
   document.querySelectorAll("[data-process-mode]").forEach((button) => button.classList.toggle("is-active", button.dataset.processMode === mode));
-  document.querySelectorAll(".process-only").forEach((node) => { node.hidden = mode !== "processes"; });
+  document.querySelectorAll(".process-only").forEach((node) => { node.hidden = mode === "programs"; });
 }
 
 function renderStorage(snapshot) {
   const system = snapshot.system || {};
   const disks = system.disks || [];
   const diskIo = system.disk_io || {};
+  const storageHealth = system.storage_health || {};
   const history = system.history || {};
   el.storageReadRate.textContent = formatRate(diskIo.read_bytes_per_s || 0);
   el.storageWriteRate.textContent = formatRate(diskIo.write_bytes_per_s || 0);
+  el.storageIops.textContent = `${(Number(diskIo.read_iops || 0) + Number(diskIo.write_iops || 0)).toFixed(1)}/s`;
+  el.storageLatency.textContent = `R ${Number(diskIo.read_latency_ms || 0).toFixed(1)} · W ${Number(diskIo.write_latency_ms || 0).toFixed(1)} ms`;
   el.diskGrid.innerHTML = disks.length ? disks.map((disk) => `
     <article class="disk-card">
       <div class="disk-head">
@@ -506,12 +604,327 @@ function renderStorage(snapshot) {
     { values: history.disk_write_bytes_per_s || [], color: COLORS.write, fill: false },
   ], { height: 64, grid: true });
 
+  el.smartProvider.textContent = storageHealth.available ? `SMART · ${String(storageHealth.provider || "provider").toUpperCase()}` : "SMART · UNAVAILABLE";
+  const smartDevices = storageHealth.devices || [];
+  el.smartDeviceList.innerHTML = smartDevices.length ? smartDevices.map((device) => {
+    const healthLabel = device.health === "passed" ? "健康" : device.health === "failed" ? "故障" : "未知";
+    const details = [
+      device.temperature_c !== null && device.temperature_c !== undefined ? `${Number(device.temperature_c).toFixed(1)}°C` : null,
+      device.percentage_used !== null && device.percentage_used !== undefined ? `寿命已用 ${Number(device.percentage_used).toFixed(0)}%` : null,
+      device.available_spare_percent !== null && device.available_spare_percent !== undefined ? `备用 ${Number(device.available_spare_percent).toFixed(0)}%` : null,
+      device.media_errors !== null && device.media_errors !== undefined ? `介质错误 ${formatNumber(device.media_errors)}` : null,
+    ].filter(Boolean);
+    return `<div class="device-row">
+      <div class="device-title"><strong>${escapeHtml(device.model || device.identifier || device.device)}</strong><span>${escapeHtml([device.device, device.protocol, device.solid_state === true ? "SSD" : device.solid_state === false ? "HDD" : ""].filter(Boolean).join(" · "))}</span></div>
+      <span class="health-badge is-${escapeHtml(device.health || "unknown")}">${healthLabel} · ${escapeHtml(device.smart_status || "Unknown")}</span>
+      <div class="device-metrics">${details.length ? details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join("") : `<span>提供器未返回详细 SMART 属性</span>`}</div>
+    </div>`;
+  }).join("") : `<div class="empty-state compact">${escapeHtml(storageHealth.note || "当前设备没有可读取的 SMART 数据")}</div>`;
+
+  const ioDevices = diskIo.devices || [];
+  el.deviceIoList.innerHTML = ioDevices.length ? ioDevices.map((device) => `
+    <div class="device-row io-device-row">
+      <div class="device-title"><strong>${escapeHtml(device.device || "disk")}</strong><span>${formatRate(Number(device.read_bytes_per_s || 0) + Number(device.write_bytes_per_s || 0))} 总吞吐</span></div>
+      <div class="device-metrics io-device-metrics">
+        <span>读 <b>${Number(device.read_iops || 0).toFixed(1)}</b> IOPS · <b>${Number(device.read_latency_ms || 0).toFixed(2)}</b> ms</span>
+        <span>写 <b>${Number(device.write_iops || 0).toFixed(1)}</b> IOPS · <b>${Number(device.write_latency_ms || 0).toFixed(2)}</b> ms</span>
+      </div>
+    </div>`).join("") : `<div class="empty-state compact">当前平台没有暴露设备级 I/O 计数器</div>`;
+
   const sensors = system.sensors || [];
   const battery = system.battery;
   const rows = sensors.map((sensor) => `
     <div class="sensor-row"><span>${escapeHtml(sensor.label || sensor.group)}</span><b>${Number(sensor.current_c || 0).toFixed(1)}°C</b></div>`);
   if (battery) rows.push(`<div class="sensor-row"><span>电池${battery.plugged ? " · 已接电源" : ""}</span><b>${formatPct(battery.percent, 0)}</b></div>`);
   el.sensorList.innerHTML = rows.length ? rows.join("") : `<div class="empty-state compact">当前平台没有暴露可读取的温度或电池传感器</div>`;
+}
+
+function serviceStateLabel(stateValue, subState = "") {
+  const key = String(stateValue || "unknown");
+  const label = {
+    running: "运行中",
+    active: "活跃",
+    inactive: "未运行",
+    exited: "已退出",
+    failed: "失败",
+    activating: "启动中",
+    deactivating: "停止中",
+    reloading: "重载中",
+  }[key] || key;
+  return subState && subState !== key ? `${label} · ${subState}` : label;
+}
+
+function renderServices(model) {
+  const summary = model?.summary || {};
+  const query = state.serviceQuery.toLowerCase();
+  const source = model?.items || [];
+  const items = source.filter((item) => [item.name, item.id, item.description, item.state, item.sub_state]
+    .join(" ").toLowerCase().includes(query));
+  el.servicesProvider.textContent = model?.available ? `${String(model.provider || "service manager").toUpperCase()} · ${String(model.scope || "")}` : "UNAVAILABLE";
+  el.servicesNote.textContent = model?.note || "当前平台没有可用的系统服务提供器。";
+  renderRuntimeSummary();
+  el.serviceTableBody.innerHTML = items.length ? items.map((item) => {
+    const statusClass = item.state === "running" || item.state === "active" ? "running" : item.state === "failed" ? "zombie" : "stopped";
+    return `<tr>
+      <td><div class="service-name"><strong>${escapeHtml(item.name || item.id)}</strong><span>${escapeHtml(item.description || item.id || "--")}</span></div></td>
+      <td><span class="status-badge status-${statusClass}">${escapeHtml(serviceStateLabel(item.state, item.sub_state))}</span></td>
+      <td class="num mono">${item.pid === null || item.pid === undefined ? "--" : Number(item.pid)}</td>
+      <td class="num mono">${item.status_code === null || item.status_code === undefined ? "--" : Number(item.status_code)}</td>
+      <td>${escapeHtml(item.scope || model.scope || "--")}</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="5"><div class="empty-state">${model?.available ? "没有匹配的系统服务" : escapeHtml(model?.note || "服务清单不可用")}</div></td></tr>`;
+  el.serviceVisibleCount.textContent = `显示 ${formatNumber(items.length)} / ${formatNumber(source.length)}`;
+}
+
+function renderRuntimeSummary() {
+  const serviceSummary = state.services?.summary || {};
+  const networkSummaryModel = state.networkAttribution?.summary || {};
+  const containerSummaryModel = state.containers?.summary || {};
+  el.runtimeSummary.innerHTML = `
+    <span><b>${state.services?.available ? formatNumber(serviceSummary.running || 0) : "--"}</b> 运行服务</span>
+    <span><b>${state.networkAttribution?.available ? formatNumber(networkSummaryModel.process_count || 0) : "--"}</b> 网络进程</span>
+    <span><b>${state.containers?.available ? formatNumber(containerSummaryModel.running || 0) : "--"}</b> 运行容器</span>`;
+}
+
+function renderContainers(model) {
+  const summary = model?.summary || {};
+  const items = model?.items || [];
+  el.containerProvider.textContent = `${String(model?.provider || "CONTAINER RUNTIME").toUpperCase()} · ${model?.available ? "CONNECTED" : model?.installed ? "OFFLINE" : "NOT INSTALLED"}`;
+  el.containerNote.textContent = model?.note || "没有可用的容器运行时。";
+  el.containerSummary.innerHTML = `
+    <span><small>运行中</small><b>${model?.available ? `${formatNumber(summary.running || 0)} / ${formatNumber(summary.total || 0)}` : "--"}</b></span>
+    <span><small>CPU</small><b>${model?.metrics_available ? formatPct(summary.cpu_percent || 0) : "--"}</b></span>
+    <span><small>内存</small><b>${model?.metrics_available ? formatBytes(summary.memory_usage_bytes || 0) : "--"}</b></span>
+    <span><small>累计网络 I/O</small><b>${model?.metrics_available ? `${formatBytes(summary.network_received_bytes || 0)} ↓ · ${formatBytes(summary.network_sent_bytes || 0)} ↑` : "--"}</b></span>`;
+  el.containerGrid.innerHTML = items.length ? items.map((item) => `
+    <article class="container-card ${item.running ? "is-running" : ""}">
+      <div class="container-head">
+        <div class="container-identity"><span class="container-cube" aria-hidden="true">◇</span><div><h4>${escapeHtml(item.name || item.short_id || "container")}</h4><p>${escapeHtml(item.image || item.short_id || "--")}</p></div></div>
+        <span class="health-badge ${item.running ? "is-passed" : ""}">${escapeHtml(item.state || "unknown")}</span>
+      </div>
+      <div class="container-metrics">
+        <span><small>CPU</small><b>${item.cpu_percent === null || item.cpu_percent === undefined ? "--" : formatPct(item.cpu_percent)}</b></span>
+        <span><small>内存</small><b>${item.memory_usage_bytes === null || item.memory_usage_bytes === undefined ? "--" : formatBytes(item.memory_usage_bytes)}</b></span>
+        <span><small>网络</small><b>${item.network_received_bytes === null || item.network_received_bytes === undefined ? "--" : `${formatBytes(item.network_received_bytes)} / ${formatBytes(item.network_sent_bytes || 0)}`}</b></span>
+        <span><small>PIDs</small><b>${formatNumber(item.pid_count || 0)}</b></span>
+      </div>
+      <div class="container-foot"><span>${escapeHtml(item.status || "--")}</span><span title="${escapeHtml(item.ports || "")}">${escapeHtml(item.ports || "无端口映射")}</span></div>
+    </article>`).join("") : `<div class="empty-state container-empty">${escapeHtml(model?.note || "当前没有容器")}</div>`;
+  renderRuntimeSummary();
+}
+
+function renderNetworkAttribution(model) {
+  const summary = model?.summary || {};
+  const items = (model?.items || []).slice(0, 120);
+  const throughput = Boolean(model?.throughput_available);
+  el.networkProvider.textContent = `${String(model?.provider || "NETWORK").toUpperCase()} · ${throughput ? "THROUGHPUT" : "CONNECTIONS"}`;
+  el.networkNote.textContent = model?.note || "逐进程网络归因不可用。";
+  el.networkSummary.innerHTML = `
+    <span><small>归因下行</small><b>${throughput ? formatRate(summary.received_bytes_per_s || 0) : "连接模式"}</b></span>
+    <span><small>归因上行</small><b>${throughput ? formatRate(summary.sent_bytes_per_s || 0) : "连接模式"}</b></span>
+    <span><small>连接</small><b>${formatNumber(summary.connection_count || 0)}</b></span>
+    <span><small>网络进程</small><b>${formatNumber(summary.process_count || 0)}</b></span>`;
+  el.networkTableBody.innerHTML = items.length ? items.map((item) => {
+    const endpoints = item.remote_endpoints || [];
+    return `<tr>
+      <td><div class="process-name-cell"><span class="process-avatar">${escapeHtml(initials(item.name))}</span><span class="process-name">${escapeHtml(item.name || `PID ${item.pid}`)}<span class="process-sub">${formatNumber(item.established_count || 0)} established · ${formatNumber(item.listen_count || 0)} listen</span></span></div></td>
+      <td class="num mono">${Number(item.pid || 0)}</td>
+      <td class="num mono">${throughput && item.received_bytes_per_s !== null ? formatRate(item.received_bytes_per_s || 0) : "--"}</td>
+      <td class="num mono">${throughput && item.sent_bytes_per_s !== null ? formatRate(item.sent_bytes_per_s || 0) : "--"}</td>
+      <td class="num mono">${formatNumber(item.connection_count || 0)}</td>
+      <td title="${escapeHtml(endpoints.join(", "))}"><span class="endpoint-list">${escapeHtml(endpoints.slice(0, 2).join(" · ") || "--")}</span></td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="6"><div class="empty-state">${escapeHtml(model?.note || "没有可读取的逐进程网络活动")}</div></td></tr>`;
+  el.networkVisibleCount.textContent = `显示 ${formatNumber(items.length)} / ${formatNumber(model?.items?.length || 0)}${throughput ? " · 字节率每 4 秒刷新" : " · 吞吐归因不可用"}`;
+  renderRuntimeSummary();
+}
+
+function renderRuntime() {
+  if (state.containers) renderContainers(state.containers);
+  if (state.services) renderServices(state.services);
+  if (state.networkAttribution) renderNetworkAttribution(state.networkAttribution);
+}
+
+async function fetchServices(force = false) {
+  el.refreshServices.disabled = true;
+  try {
+    const response = await fetch(`/api/services${force ? "?refresh=1" : ""}`, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    state.services = payload;
+    if (state.view === "runtime") renderServices(payload);
+  } catch (error) {
+    state.services = { available: false, items: [], summary: {}, note: error.message || "服务读取失败" };
+    if (state.view === "runtime") renderServices(state.services);
+  } finally {
+    el.refreshServices.disabled = false;
+  }
+}
+
+async function fetchNetwork(force = false) {
+  el.refreshNetwork.disabled = true;
+  try {
+    const response = await fetch(`/api/network-attribution${force ? "?refresh=1" : ""}`, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    state.networkAttribution = payload;
+    if (state.view === "runtime") renderNetworkAttribution(payload);
+  } catch (error) {
+    state.networkAttribution = { available: false, throughput_available: false, items: [], summary: {}, note: error.message || "网络归因读取失败" };
+    if (state.view === "runtime") renderNetworkAttribution(state.networkAttribution);
+  } finally {
+    el.refreshNetwork.disabled = false;
+  }
+}
+
+async function fetchContainers(force = false) {
+  el.refreshContainers.disabled = true;
+  try {
+    const response = await fetch(`/api/containers${force ? "?refresh=1" : ""}`, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    state.containers = payload;
+    if (state.view === "runtime") renderContainers(payload);
+  } catch (error) {
+    state.containers = { available: false, installed: false, items: [], summary: {}, note: error.message || "容器清单读取失败" };
+    if (state.view === "runtime") renderContainers(state.containers);
+  } finally {
+    el.refreshContainers.disabled = false;
+  }
+}
+
+function eventActionLabel(action) {
+  return {
+    opened: "触发",
+    escalated: "升级",
+    deescalated: "降级",
+    resolved: "恢复",
+  }[action] || action || "变化";
+}
+
+function renderAlertBadge(snapshot) {
+  const active = Number(snapshot.observability?.summary?.active || 0);
+  el.alertBadge.hidden = active <= 0;
+  el.alertBadge.textContent = active > 99 ? "99+" : String(active);
+}
+
+function renderEvents(snapshot) {
+  const model = snapshot.observability || {};
+  const summary = model.summary || {};
+  const active = model.active || [];
+  const events = model.events || [];
+  const thresholds = model.thresholds || {};
+  renderAlertBadge(snapshot);
+
+  el.alertSummary.innerHTML = `<span><b>${formatNumber(summary.active || 0)}</b> 活跃</span><span><b>${formatNumber(summary.critical || 0)}</b> 严重</span><span><b>${formatNumber(summary.warning || 0)}</b> 警告</span>`;
+  el.activeAlerts.innerHTML = active.length ? active.map((item) => `
+    <article class="active-alert is-${escapeHtml(item.severity)}">
+      <span class="alert-indicator" aria-hidden="true"></span>
+      <div><strong>${escapeHtml(item.label)}</strong><p>自 ${escapeHtml(formatEventTime(item.since))} 起高于 ${Number(item.threshold || 0).toFixed(0)}${escapeHtml(item.unit)}</p></div>
+      <b>${Number(item.value || 0).toFixed(1)}${escapeHtml(item.unit)}</b>
+    </article>`).join("") : `<div class="empty-state">当前没有活跃资源告警</div>`;
+
+  const thresholdSignature = JSON.stringify(thresholds);
+  if (state.thresholdRenderSignature !== thresholdSignature) {
+    state.thresholdRenderSignature = thresholdSignature;
+    el.thresholdGrid.innerHTML = Object.entries(thresholds).map(([resource, rule]) => `
+      <article class="threshold-card" data-threshold-resource="${escapeHtml(resource)}">
+        <div class="threshold-card-head"><strong>${escapeHtml(rule.label || resource)}</strong><label class="switch-label"><input data-threshold-enabled type="checkbox" ${rule.enabled ? "checked" : ""}><span>启用</span></label></div>
+        <div class="threshold-inputs">
+          <label>警告 <span><input data-threshold-warning type="number" min="0" max="99" step="1" value="${Number(rule.warning || 0)}"><i>${escapeHtml(rule.unit || "%")}</i></span></label>
+          <label>严重 <span><input data-threshold-critical type="number" min="1" max="100" step="1" value="${Number(rule.critical || 0)}"><i>${escapeHtml(rule.unit || "%")}</i></span></label>
+        </div>
+      </article>`).join("") || `<div class="empty-state">没有可配置的阈值</div>`;
+  }
+
+  el.eventCount.textContent = `${formatNumber(events.length)} 条状态变化`;
+  el.eventTimeline.innerHTML = events.length ? events.map((item) => `
+    <article class="timeline-event is-${escapeHtml(item.severity)} ${item.action === "resolved" ? "is-resolved" : ""}">
+      <div class="timeline-marker"><span></span></div>
+      <div class="timeline-copy">
+        <div><strong>${escapeHtml(item.label)}</strong><span class="event-action">${escapeHtml(eventActionLabel(item.action))}</span><time>${escapeHtml(formatEventTime(item.timestamp))}</time></div>
+        <p>${escapeHtml(item.message)}</p>
+      </div>
+      <span class="timeline-value">${item.value === null || item.value === undefined ? "--" : `${Number(item.value).toFixed(1)}${escapeHtml(item.unit)}`}</span>
+    </article>`).join("") : `<div class="empty-state">尚无阈值状态变化；时间线会在资源越过阈值时出现事件。</div>`;
+  if (state.historyModel) renderPersistentHistory(state.historyModel);
+}
+
+function renderPersistentHistory(model) {
+  const series = model.series || {};
+  const persistence = model.persistence || {};
+  const pointCount = Number(model.point_count || 0);
+  el.persistentHistoryChart.classList.remove("skeleton-block");
+  el.persistentHistoryChart.innerHTML = pointCount ? renderChart([
+    { values: series.cpu_percent || [], color: COLORS.cpu },
+    { values: series.memory_percent || [], color: COLORS.memory, fill: false },
+    { values: series.gpu_percent || [], color: COLORS.gpu, fill: false },
+  ], { height: 66, scaleMax: 100, grid: true }) : `<div class="empty-state compact">当前范围还没有持久采样；数据库每 ${Number(persistence.persist_interval_seconds || 5)} 秒写入一次。</div>`;
+  el.persistenceFacts.innerHTML = persistence.available ? `
+    <span><b>${formatNumber(pointCount)}</b> 图表点</span>
+    <span><b>${formatNumber(persistence.sample_count || 0)}</b> 原始采样</span>
+    <span><b>${formatBytes(persistence.database_bytes || 0)}</b> SQLite</span>
+    <span><b>${Number(model.resolution_seconds || 0)}s</b> 聚合粒度</span>
+    <span title="${escapeHtml(persistence.path || "")}"><b>${formatNumber(persistence.retention_days || 0)} 天</b> 保留期</span>` : `<span class="is-error">SQLite 不可用：${escapeHtml(persistence.error || "无法创建本地数据库")}</span>`;
+  document.querySelectorAll("[data-history-range]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.historyRange === state.historyRange);
+  });
+}
+
+async function fetchHistory(range = "1h") {
+  state.historyRange = range;
+  const request = ++state.historyRequest;
+  document.querySelectorAll("[data-history-range]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.historyRange === range);
+  });
+  el.persistentHistoryChart.classList.add("skeleton-block");
+  try {
+    const response = await fetch(`/api/history?range=${encodeURIComponent(range)}`, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    if (request !== state.historyRequest) return;
+    state.historyModel = payload;
+    renderPersistentHistory(payload);
+  } catch (error) {
+    if (request !== state.historyRequest) return;
+    el.persistentHistoryChart.classList.remove("skeleton-block");
+    el.persistentHistoryChart.innerHTML = `<div class="empty-state compact">${escapeHtml(error.message || "历史查询失败")}</div>`;
+  }
+}
+
+async function saveThresholds() {
+  const thresholds = {};
+  for (const card of el.thresholdGrid.querySelectorAll("[data-threshold-resource]")) {
+    const warning = Number(card.querySelector("[data-threshold-warning]").value);
+    const critical = Number(card.querySelector("[data-threshold-critical]").value);
+    if (!Number.isFinite(warning) || !Number.isFinite(critical) || warning < 0 || warning >= critical || critical > 100) {
+      showToast(`${card.querySelector("strong").textContent} 的阈值无效`, true);
+      return;
+    }
+    thresholds[card.dataset.thresholdResource] = {
+      warning,
+      critical,
+      enabled: card.querySelector("[data-threshold-enabled]").checked,
+    };
+  }
+  el.saveThresholds.disabled = true;
+  try {
+    const response = await fetch("/api/thresholds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ thresholds }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    if (state.snapshot?.observability) state.snapshot.observability.thresholds = payload.thresholds;
+    state.thresholdRenderSignature = "";
+    renderEvents(state.snapshot);
+    showToast("资源阈值已保存");
+  } catch (error) {
+    showToast(error.message || "阈值保存失败", true);
+  } finally {
+    el.saveThresholds.disabled = false;
+  }
 }
 
 function renderAi(snapshot) {
@@ -537,15 +950,20 @@ function renderCurrentView() {
   if (!state.snapshot) return;
   if (state.view === "overview") renderOverview(state.snapshot);
   if (state.view === "processes") renderProcesses(state.snapshot);
+  if (state.view === "events") renderEvents(state.snapshot);
   if (state.view === "storage") renderStorage(state.snapshot);
+  if (state.view === "runtime") renderRuntime();
   if (state.view === "ai") renderAi(state.snapshot);
 }
 
 function renderAll() {
   if (!state.snapshot) return;
   renderOverview(state.snapshot);
+  renderAlertBadge(state.snapshot);
   if (state.view === "processes") renderProcesses(state.snapshot);
+  if (state.view === "events") renderEvents(state.snapshot);
   if (state.view === "storage") renderStorage(state.snapshot);
+  if (state.view === "runtime") renderRuntime();
   if (state.view === "ai") renderAi(state.snapshot);
 }
 
@@ -608,6 +1026,11 @@ function renderProcessDetails(detail) {
     : `<div class="empty-state compact">没有可读取的打开文件</div>`;
   const connections = Object.entries(detail.connections || {});
   const connectionText = connections.length ? connections.map(([name, count]) => `${name} ${count}`).join(" · ") : "无或无权限读取";
+  const networkModel = detail.network_attribution || {};
+  const networkItem = networkModel.item || {};
+  const networkDown = networkModel.throughput_available && networkItem.received_bytes_per_s !== null && networkItem.received_bytes_per_s !== undefined ? formatRate(networkItem.received_bytes_per_s) : "不可用";
+  const networkUp = networkModel.throughput_available && networkItem.sent_bytes_per_s !== null && networkItem.sent_bytes_per_s !== undefined ? formatRate(networkItem.sent_bytes_per_s) : "不可用";
+  const endpointList = networkItem.remote_endpoints?.length ? networkItem.remote_endpoints.map((endpoint) => `<div class="detail-block"><dd>${escapeHtml(endpoint)}</dd></div>`).join("") : `<div class="empty-state compact">${escapeHtml(networkModel.note || "没有可读取的远端端点")}</div>`;
   const managementButtons = detail.manageable ? `
     <button class="action-btn" data-process-action="${detail.status === "stopped" ? "resume" : "suspend"}" type="button">${detail.status === "stopped" ? "恢复进程" : "暂停进程"}</button>
     <button class="danger-btn" data-confirm-terminate type="button">结束进程</button>
@@ -629,9 +1052,12 @@ function renderProcessDetails(detail) {
       ${detailField("父进程", `PID ${detail.ppid || 0}`)}
       ${detailField("子进程", formatNumber(detail.children?.length || 0))}
       ${detailField("网络连接", connectionText)}
+      ${detailField("网络下行", networkDown)}
+      ${detailField("网络上行", networkUp)}
     </div>
     <section class="detail-section"><h4>工作目录</h4><div class="command-block">${escapeHtml(detail.cwd || "不可读取")}</div><div class="copy-actions"><button class="secondary-btn" data-copy-field="cwd" type="button">复制目录</button></div></section>
     <section class="detail-section"><h4>命令</h4><pre class="command-block">${escapeHtml(detail.cmdline || "不可读取")}</pre><div class="copy-actions"><button class="secondary-btn" data-copy-field="pid" type="button">复制 PID</button><button class="secondary-btn" data-copy-field="cmdline" type="button">复制命令</button></div></section>
+    <section class="detail-section"><h4>网络归因 · ${escapeHtml(networkModel.provider || "unavailable")}</h4><div class="detail-list">${endpointList}</div></section>
     <section class="detail-section"><h4>打开的文件</h4><div class="detail-list">${fileList}</div></section>
     <section class="detail-section"><h4>进程管理</h4><div class="process-actions">${managementButtons}</div></section>`;
 }
@@ -736,6 +1162,11 @@ document.addEventListener("click", (event) => {
     renderProcesses(state.snapshot);
     return;
   }
+  const historyButton = event.target.closest("[data-history-range]");
+  if (historyButton) {
+    fetchHistory(historyButton.dataset.historyRange);
+    return;
+  }
   const sortButtonNode = event.target.closest("[data-process-sort]");
   if (sortButtonNode) {
     const key = sortButtonNode.dataset.processSort;
@@ -790,6 +1221,17 @@ el.showMoreProcesses.addEventListener("click", () => {
   state.processLimit += 100;
   renderProcesses(state.snapshot);
 });
+
+el.saveThresholds.addEventListener("click", saveThresholds);
+
+el.serviceSearch.addEventListener("input", (event) => {
+  state.serviceQuery = event.target.value.trim();
+  if (state.services) renderServices(state.services);
+});
+
+el.refreshServices.addEventListener("click", () => fetchServices(true));
+el.refreshNetwork.addEventListener("click", () => fetchNetwork(true));
+el.refreshContainers.addEventListener("click", () => fetchContainers(true));
 
 el.closeDetails.addEventListener("click", closeProcess);
 el.drawerScrim.addEventListener("click", closeProcess);

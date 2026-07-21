@@ -58,6 +58,9 @@ When a machine feels slow, the responsible workload is often hidden behind helpe
 | Is pressure coming from CPU, GPU, memory, or storage? | Web overview resource cards and live history |
 | Which programs and individual PIDs are responsible? | Web Programs / Processes inventory |
 | How much disk space remains on each local volume? | Web Storage view |
+| Did a resource cross a limit, and when did it recover? | Web Events timeline and SQLite history |
+| Which service, process, or container owns the activity? | Process tree and Web Runtime view |
+| Which process is sending or receiving data? | Runtime per-process network attribution |
 
 ## Features
 
@@ -72,6 +75,12 @@ When a machine feels slow, the responsible workload is often hidden behind helpe
 | Extension inventory | Installed Cursor / VS Code AI extensions with version and host |
 | System resource center | Live CPU, GPU, memory, swap, storage, disk I/O, network, sensors, and short histories |
 | Full process inventory | System-readable programs and PIDs with search, filtering, sorting, and details |
+| Process tree and services | PID/PPID hierarchy plus cached launchd or systemd service inventory |
+| Thresholds and events | Editable warning/critical thresholds with hysteresis, active alerts, and transition-only timeline |
+| Persistent history | SQLite WAL storage, 7-day retention, and downsampled 15m / 1h / 6h / 24h / 7d queries |
+| Storage health | Per-device throughput, IOPS, average latency, and SMART/NVMe health via diskutil or smartctl |
+| Network attribution | macOS per-process byte rates via nettop; connection and endpoint fallback where byte counters are unavailable |
+| Container runtime | Docker/Podman inventory and one-shot CPU, memory, network, block I/O, port, and PID metrics |
 | Guarded process actions | Suspend, resume, or terminate current-user processes with protected PID and same-origin checks |
 
 ## Install
@@ -153,9 +162,11 @@ see-aicoding --web --open
 ```
 
 The Web monitor serves a local-only system resource center at
-`http://127.0.0.1:8765/`. Its four views cover system overview, grouped programs
-and individual processes, local storage, and the preserved AI workload model.
-Apple Silicon, NVIDIA, and Linux DRM GPU providers are detected at runtime.
+`http://127.0.0.1:8765/`. Its six views cover system overview, grouped programs
+and PID trees, thresholds and persistent history, local storage health, system
+services/network/container runtime, and the preserved AI workload model.
+Apple Silicon, NVIDIA, Linux DRM, SMART, launchd/systemd, nettop, Docker, and
+Podman providers are detected at runtime and expose explicit unavailable states.
 Process details are loaded on demand; current-user suspend, resume, and
 terminate actions are protected by same-origin checks, PID guards, and an
 in-product confirmation step.
@@ -240,7 +251,11 @@ src/see_aicoding/
 ├── monitor.py         # process sampling, classification, session aggregation
 ├── render.py          # Rich layout, panels, colors, tables
 ├── snapshot.py        # JSON snapshots for the web monitor
-├── telemetry.py       # system metrics, histories, GPU adapters, process actions
+├── telemetry.py       # system metrics, GPU, disk counters, process actions
+├── observability.py   # threshold state machine and transition events
+├── persistence.py     # SQLite samples, events, settings, and range queries
+├── storage.py         # diskutil/smartctl health adapters
+├── runtime.py         # services, per-process network, Docker/Podman adapters
 ├── web.py             # local ThreadingHTTPServer + SSE endpoints
 ├── web_static/        # browser UI assets
 ├── cursor_ext.py      # Cursor / VS Code AI extension scanner
@@ -256,8 +271,9 @@ Sampling flow:
 4. Project names are inferred from cwd, repo markers, and selected desktop app child processes.
 5. `render_all()` draws the header, three zones, current-user resource watch, footer, sparklines, and extension inventory.
 6. `SystemTelemetry.sample()` adds CPU, GPU, memory, disk, network, sensor, and history data.
-7. `build_snapshot()` normalizes schema v2 for `/api/snapshot` and cached `/events` delivery.
-8. Selected process details and guarded actions use separate on-demand endpoints.
+7. Threshold transitions and resource samples are written to SQLite with a bounded retention policy.
+8. `build_snapshot()` normalizes schema v3 for `/api/snapshot` and cached `/events` delivery.
+9. Services, long history, process network attribution, containers, and selected process details use separate on-demand endpoints.
 
 ## Notes
 
@@ -266,6 +282,6 @@ Sampling flow:
 - Resource watch groups app helper processes together, sums each group's RSS and CPU percentage, then divides CPU by logical CPU count so it is comparable with the header capacity bars.
 - On macOS, Google Chrome rows can append full window and tab counts via AppleScript when the terminal has permission to query Chrome; failures are hidden so monitoring keeps working.
 - System memory uses `total - available`, so the displayed size and percentage share the same pressure-oriented basis.
-- Network speed is sampled from OS network counters, so it shows current machine traffic, not per-AI-process traffic.
+- Whole-machine network speed comes from OS counters. On macOS, nettop also provides per-process byte-rate attribution; other platforms fall back to readable socket ownership and explicitly mark throughput unavailable.
 - Pure extension API activity cannot always be separated from the Cursor Extension Host process.
 - Network activity is treated as a lightweight live/idle signal; reverse-DNS attribution is intentionally avoided.

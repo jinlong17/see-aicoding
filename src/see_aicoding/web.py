@@ -19,6 +19,9 @@ import psutil
 
 from .cursor_ext import scan_installed_extensions
 from .monitor import History, Sampler, build_sessions
+from .observability import ThresholdEngine
+from .persistence import HistoryStore
+from .runtime import ContainerCollector, NetworkAttributionCollector, ServiceCollector
 from .snapshot import build_snapshot
 from .telemetry import SystemTelemetry, inspect_process, manage_process
 
@@ -34,8 +37,17 @@ class MonitorState:
         self.sampler = Sampler(include_all_users=True)
         self.history = History()
         self.telemetry = SystemTelemetry()
+        self.store = HistoryStore(persist_interval_s=max(5.0, self.refresh_s))
+        stored_thresholds = self.store.load_setting("thresholds", {})
+        self.thresholds = ThresholdEngine(
+            stored_thresholds if isinstance(stored_thresholds, dict) else None
+        )
+        self.services = ServiceCollector()
+        self.network_attribution = NetworkAttributionCollector()
+        self.containers = ContainerCollector()
         self.extensions = scan_installed_extensions()
         self._lock = threading.Lock()
+        self._runtime_lock = threading.Lock()
         self._cached_json = ""
         self._cached_at = 0.0
 
@@ -55,6 +67,10 @@ class MonitorState:
                 download_bytes_per_s=self.history.net_recv_per_s,
                 upload_bytes_per_s=self.history.net_sent_per_s,
             )
+            generated_at = time.time()
+            transitions = self.thresholds.evaluate(system_metrics, timestamp=generated_at)
+            self.store.record_events(transitions)
+            self.store.record_sample(system_metrics, timestamp=generated_at)
             snapshot = build_snapshot(
                 sessions,
                 procs,
@@ -62,6 +78,7 @@ class MonitorState:
                 self.extensions,
                 self.refresh_s,
                 system_metrics=system_metrics,
+                observability=self._observability_snapshot(),
             )
             self._cached_json = json.dumps(
                 snapshot,
@@ -72,13 +89,66 @@ class MonitorState:
             return self._cached_json
 
     def process_details(self, pid: int) -> dict:
-        return inspect_process(pid)
+        details = inspect_process(pid)
+        with self._runtime_lock:
+            network = self.network_attribution.sample()
+        attributed = next(
+            (item for item in network.get("items", []) if int(item.get("pid") or 0) == pid),
+            None,
+        )
+        details["network_attribution"] = {
+            "provider": network.get("provider"),
+            "throughput_available": network.get("throughput_available", False),
+            "note": network.get("note"),
+            "item": attributed,
+        }
+        return details
 
     def process_action(self, pid: int, action: str) -> dict:
         result = manage_process(pid, action)
         with self._lock:
             self._cached_at = 0.0
         return result
+
+    def threshold_snapshot(self) -> dict:
+        with self._lock:
+            return self._observability_snapshot()
+
+    def _observability_snapshot(self) -> dict:
+        result = self.thresholds.snapshot()
+        if self.store.available:
+            result["events"] = self.store.query_events(limit=100)
+        result["persistence"] = self.store.status()
+        result["history_ranges"] = ["15m", "1h", "6h", "24h", "7d"]
+        return result
+
+    def update_thresholds(self, updates: dict) -> dict:
+        with self._lock:
+            values = self.thresholds.update_thresholds(updates)
+            persisted = self.store.save_setting("thresholds", values)
+            self._cached_at = 0.0
+            return {"thresholds": values, "persisted": persisted}
+
+    def history_snapshot(self, range_key: str) -> dict:
+        return self.store.query_history(range_key)
+
+    def persistent_events(self, limit: int) -> dict:
+        return {
+            "events": self.store.query_events(limit=limit),
+            "persistence": self.store.status(),
+        }
+
+    def service_snapshot(self, force: bool = False) -> dict:
+        with self._runtime_lock:
+            return self.services.sample(force=force)
+
+    def network_snapshot(self, force: bool = False) -> dict:
+        with self._runtime_lock:
+            return self.network_attribution.sample(force=force)
+
+    def container_snapshot(self, force: bool = False) -> dict:
+        with self._runtime_lock:
+            return self.containers.sample(force=force)
 
 
 class WebMonitorServer(ThreadingHTTPServer):
@@ -96,7 +166,7 @@ class WebMonitorServer(ThreadingHTTPServer):
 
 
 class WebMonitorHandler(BaseHTTPRequestHandler):
-    server_version = "see-aicoding-web/0.2"
+    server_version = "see-aicoding-web/0.3"
 
     def log_message(self, fmt: str, *args) -> None:
         sys.stderr.write(f"[see-aicoding:web] {self.address_string()} {fmt % args}\n")
@@ -118,6 +188,42 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/snapshot":
             self._serve_snapshot()
             return
+        if parsed.path == "/api/thresholds":
+            self._serve_json(self.monitor_server.state.threshold_snapshot())
+            return
+        if parsed.path == "/api/history":
+            query = parse_qs(parsed.query)
+            range_key = (query.get("range") or ["1h"])[0]
+            try:
+                payload = self.monitor_server.state.history_snapshot(range_key)
+            except ValueError as exc:
+                self._serve_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+                return
+            self._serve_json(payload)
+            return
+        if parsed.path == "/api/resource-events":
+            query = parse_qs(parsed.query)
+            try:
+                limit = int((query.get("limit") or ["100"])[0])
+            except ValueError:
+                limit = 100
+            self._serve_json(self.monitor_server.state.persistent_events(limit))
+            return
+        if parsed.path == "/api/services":
+            query = parse_qs(parsed.query)
+            force = (query.get("refresh") or ["0"])[0] == "1"
+            self._serve_json(self.monitor_server.state.service_snapshot(force=force))
+            return
+        if parsed.path == "/api/network-attribution":
+            query = parse_qs(parsed.query)
+            force = (query.get("refresh") or ["0"])[0] == "1"
+            self._serve_json(self.monitor_server.state.network_snapshot(force=force))
+            return
+        if parsed.path == "/api/containers":
+            query = parse_qs(parsed.query)
+            force = (query.get("refresh") or ["0"])[0] == "1"
+            self._serve_json(self.monitor_server.state.container_snapshot(force=force))
+            return
         if parsed.path.startswith("/api/process/"):
             self._serve_process_details(parsed.path)
             return
@@ -132,10 +238,62 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/thresholds":
+            self._serve_threshold_update()
+            return
         if parsed.path.startswith("/api/process/") and parsed.path.endswith("/action"):
             self._serve_process_action(parsed.path)
             return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _request_origin_allowed(self) -> bool:
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        origin_host = urlparse(origin).hostname or ""
+        return (
+            origin_host == "localhost"
+            or origin_host == "::1"
+            or origin_host.startswith("127.")
+        )
+
+    def _read_json_object(self, max_bytes: int = 4096) -> dict:
+        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
+            raise TypeError("Expected application/json.")
+        try:
+            content_length = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            content_length = 0
+        if content_length <= 0 or content_length > max_bytes:
+            raise ValueError("Invalid request body.")
+        payload = json.loads(self.rfile.read(content_length))
+        if not isinstance(payload, dict):
+            raise ValueError("Expected a JSON object.")
+        return payload
+
+    def _serve_threshold_update(self) -> None:
+        if not self._request_origin_allowed():
+            self._serve_json(
+                {"error": "Cross-origin threshold changes are blocked."},
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        try:
+            payload = self._read_json_object(max_bytes=16384)
+            updates = payload.get("thresholds", payload)
+            if not isinstance(updates, dict):
+                raise ValueError("Threshold updates must be an object.")
+            result = self.monitor_server.state.update_thresholds(updates)
+        except TypeError as exc:
+            self._serve_json({"error": str(exc)}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+            return
+        except json.JSONDecodeError:
+            self._serve_json({"error": "Invalid JSON body."}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as exc:
+            self._serve_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self._serve_json(result)
 
     def _serve_snapshot(self) -> None:
         try:
@@ -187,28 +345,19 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
         if pid is None:
             self._serve_json({"error": "Invalid process id."}, HTTPStatus.BAD_REQUEST)
             return
-        origin = self.headers.get("Origin")
-        if origin:
-            origin_host = urlparse(origin).hostname or ""
-            if not (origin_host == "localhost" or origin_host == "::1" or origin_host.startswith("127.")):
-                self._serve_json({"error": "Cross-origin process actions are blocked."}, HTTPStatus.FORBIDDEN)
-                return
-        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
-            self._serve_json({"error": "Expected application/json."}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+        if not self._request_origin_allowed():
+            self._serve_json(
+                {"error": "Cross-origin process actions are blocked."},
+                HTTPStatus.FORBIDDEN,
+            )
             return
         try:
-            content_length = int(self.headers.get("Content-Length") or "0")
-        except ValueError:
-            content_length = 0
-        if content_length <= 0 or content_length > 4096:
-            self._serve_json({"error": "Invalid request body."}, HTTPStatus.BAD_REQUEST)
-            return
-        try:
-            payload = json.loads(self.rfile.read(content_length))
-            if not isinstance(payload, dict):
-                raise ValueError("Expected a JSON object.")
+            payload = self._read_json_object()
             action = str(payload.get("action") or "")
             result = self.monitor_server.state.process_action(pid, action)
+        except TypeError as exc:
+            self._serve_json({"error": str(exc)}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+            return
         except json.JSONDecodeError:
             self._serve_json({"error": "Invalid JSON body."}, HTTPStatus.BAD_REQUEST)
             return
