@@ -2,9 +2,9 @@
 
 <div align="center">
 
-**A focused terminal dashboard for AI coding processes.**
+**A local system resource dashboard with AI coding workload context.**
 
-Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child processes, CPU, memory, uptime, project attribution, local storage, network throughput, and current-user resource Top5 pressure from one compact TUI.
+Track CPU, GPU, memory, disks, I/O, network, programs, processes, and AI coding workloads from one local-only dashboard. The compact terminal view remains available for focused Claude, Codex, and Cursor monitoring.
 
 `pip install --user git+https://github.com/jinlong17/see-aicoding.git`
 
@@ -44,7 +44,7 @@ Track Claude Code, Claude Desktop, Codex, OpenAI extensions, Cursor, child proce
 
 ## Why Use It
 
-When several AI coding tools are open at once, the expensive process is often hidden behind Electron helpers, extension hosts, or child processes. `see-aicoding` groups that noise into readable sessions so you can quickly answer:
+When a machine feels slow, the responsible workload is often hidden behind helpers, background services, extension hosts, or child processes. `see-aicoding` now provides a system-first Web view and a focused AI terminal view so you can quickly answer:
 
 | Question | Where to look |
 |---|---|
@@ -55,6 +55,9 @@ When several AI coding tools are open at once, the expensive process is often hi
 | Which AI extensions are installed? | Cursor zone extension inventory |
 | Is the whole machine under pressure? | Top-right system processor, memory, storage, and network rows |
 | Which current-user apps or process groups are hottest? | Bottom resource watch: Memory Top5 and CPU capacity Top5 |
+| Is pressure coming from CPU, GPU, memory, or storage? | Web overview resource cards and live history |
+| Which programs and individual PIDs are responsible? | Web Programs / Processes inventory |
+| How much disk space remains on each local volume? | Web Storage view |
 
 ## Features
 
@@ -67,6 +70,9 @@ When several AI coding tools are open at once, the expensive process is often hi
 | System context | Time, network throughput, system processor, system memory, and local storage |
 | Resource watch | Current-user app/process-group Memory Top5 by summed RSS and CPU Top5 normalized to whole-machine capacity, with Chrome tab counts on macOS when permitted |
 | Extension inventory | Installed Cursor / VS Code AI extensions with version and host |
+| System resource center | Live CPU, GPU, memory, swap, storage, disk I/O, network, sensors, and short histories |
+| Full process inventory | System-readable programs and PIDs with search, filtering, sorting, and details |
+| Guarded process actions | Suspend, resume, or terminate current-user processes with protected PID and same-origin checks |
 
 ## Install
 
@@ -146,12 +152,17 @@ see-aicoding --web --open     # local web monitor at 127.0.0.1:8765
 see-aicoding --web --open
 ```
 
-The web monitor keeps the same sampling engine as the terminal dashboard and
-serves a local-only control surface at `http://127.0.0.1:8765/`. It supports
-live updates, Active/All filtering, process tree toggling, search, session
-details, grouped Resource watch Top5 with Chrome tab counts when available, and
-copying PID, cwd, or command text. It does not expose destructive process
-controls.
+The Web monitor serves a local-only system resource center at
+`http://127.0.0.1:8765/`. Its four views cover system overview, grouped programs
+and individual processes, local storage, and the preserved AI workload model.
+Apple Silicon, NVIDIA, and Linux DRM GPU providers are detected at runtime.
+Process details are loaded on demand; current-user suspend, resume, and
+terminate actions are protected by same-origin checks, PID guards, and an
+in-product confirmation step.
+
+See [the resource dashboard architecture](https://github.com/jinlong17/see-aicoding/blob/main/docs/RESOURCE_DASHBOARD_ARCHITECTURE.md)
+for the research basis, module boundaries, GPU availability contract, and
+recommended next phases.
 
 ## Troubleshooting
 
@@ -229,6 +240,7 @@ src/see_aicoding/
 ├── monitor.py         # process sampling, classification, session aggregation
 ├── render.py          # Rich layout, panels, colors, tables
 ├── snapshot.py        # JSON snapshots for the web monitor
+├── telemetry.py       # system metrics, histories, GPU adapters, process actions
 ├── web.py             # local ThreadingHTTPServer + SSE endpoints
 ├── web_static/        # browser UI assets
 ├── cursor_ext.py      # Cursor / VS Code AI extension scanner
@@ -238,12 +250,14 @@ src/see_aicoding/
 
 Sampling flow:
 
-1. `Sampler.snapshot()` walks processes owned by the current user.
+1. `Sampler.snapshot()` walks the current user's processes for TUI mode and all readable system processes for Web mode.
 2. `classify()` tags each process as Claude, Codex, Cursor, extension, MCP, or child.
 3. `build_sessions()` picks root processes and attributes descendants through the parent-process chain.
 4. Project names are inferred from cwd, repo markers, and selected desktop app child processes.
 5. `render_all()` draws the header, three zones, current-user resource watch, footer, sparklines, and extension inventory.
-6. `build_snapshot()` exposes the same samples as JSON for `/api/snapshot` and `/events`.
+6. `SystemTelemetry.sample()` adds CPU, GPU, memory, disk, network, sensor, and history data.
+7. `build_snapshot()` normalizes schema v2 for `/api/snapshot` and cached `/events` delivery.
+8. Selected process details and guarded actions use separate on-demand endpoints.
 
 ## Notes
 

@@ -20,6 +20,7 @@ import psutil
 from .cursor_ext import scan_installed_extensions
 from .monitor import History, Sampler, build_sessions
 from .snapshot import build_snapshot
+from .telemetry import SystemTelemetry, inspect_process, manage_process
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -30,22 +31,54 @@ STATIC_PACKAGE = "see_aicoding.web_static"
 class MonitorState:
     def __init__(self, refresh_s: float):
         self.refresh_s = max(0.5, refresh_s)
-        self.sampler = Sampler()
+        self.sampler = Sampler(include_all_users=True)
         self.history = History()
+        self.telemetry = SystemTelemetry()
         self.extensions = scan_installed_extensions()
         self._lock = threading.Lock()
+        self._cached_json = ""
+        self._cached_at = 0.0
 
         self.sampler.snapshot()
-        psutil.cpu_percent(interval=None)
         time.sleep(min(0.5, self.refresh_s))
 
     def snapshot_json(self) -> str:
         with self._lock:
+            now = time.monotonic()
+            if self._cached_json and now - self._cached_at < self.refresh_s * 0.8:
+                return self._cached_json
             procs = self.sampler.snapshot()
             sessions = build_sessions(procs)
             self.history.record(sessions)
-            snapshot = build_snapshot(sessions, procs, self.history, self.extensions, self.refresh_s)
-        return json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
+            system_metrics = self.telemetry.sample(
+                procs,
+                download_bytes_per_s=self.history.net_recv_per_s,
+                upload_bytes_per_s=self.history.net_sent_per_s,
+            )
+            snapshot = build_snapshot(
+                sessions,
+                procs,
+                self.history,
+                self.extensions,
+                self.refresh_s,
+                system_metrics=system_metrics,
+            )
+            self._cached_json = json.dumps(
+                snapshot,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            self._cached_at = now
+            return self._cached_json
+
+    def process_details(self, pid: int) -> dict:
+        return inspect_process(pid)
+
+    def process_action(self, pid: int, action: str) -> dict:
+        result = manage_process(pid, action)
+        with self._lock:
+            self._cached_at = 0.0
+        return result
 
 
 class WebMonitorServer(ThreadingHTTPServer):
@@ -63,7 +96,7 @@ class WebMonitorServer(ThreadingHTTPServer):
 
 
 class WebMonitorHandler(BaseHTTPRequestHandler):
-    server_version = "see-aicoding-web/0.1"
+    server_version = "see-aicoding-web/0.2"
 
     def log_message(self, fmt: str, *args) -> None:
         sys.stderr.write(f"[see-aicoding:web] {self.address_string()} {fmt % args}\n")
@@ -85,12 +118,22 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/snapshot":
             self._serve_snapshot()
             return
+        if parsed.path.startswith("/api/process/"):
+            self._serve_process_details(parsed.path)
+            return
         if parsed.path == "/events":
             query = parse_qs(parsed.query)
             self._serve_events(once=query.get("once") == ["1"])
             return
         if parsed.path.startswith("/static/"):
             self._serve_static(parsed.path.removeprefix("/static/"))
+            return
+        self.send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/process/") and parsed.path.endswith("/action"):
+            self._serve_process_action(parsed.path)
             return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
 
@@ -106,6 +149,82 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    @staticmethod
+    def _pid_from_path(path: str, action: bool = False) -> int | None:
+        parts = [part for part in path.split("/") if part]
+        expected = ["api", "process", "pid", "action"] if action else ["api", "process", "pid"]
+        if len(parts) != len(expected):
+            return None
+        if parts[:2] != expected[:2] or (action and parts[-1] != "action"):
+            return None
+        try:
+            pid = int(parts[2])
+        except ValueError:
+            return None
+        return pid if pid > 0 else None
+
+    def _serve_process_details(self, path: str) -> None:
+        pid = self._pid_from_path(path)
+        if pid is None:
+            self._serve_json({"error": "Invalid process id."}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            details = self.monitor_server.state.process_details(pid)
+        except psutil.NoSuchProcess:
+            self._serve_json({"error": "Process no longer exists."}, HTTPStatus.NOT_FOUND)
+            return
+        except (psutil.AccessDenied, PermissionError) as exc:
+            self._serve_json({"error": str(exc) or "Process access denied."}, HTTPStatus.FORBIDDEN)
+            return
+        except Exception as exc:  # pragma: no cover - defensive for platform APIs.
+            self._serve_json_error(exc)
+            return
+        self._serve_json(details)
+
+    def _serve_process_action(self, path: str) -> None:
+        pid = self._pid_from_path(path, action=True)
+        if pid is None:
+            self._serve_json({"error": "Invalid process id."}, HTTPStatus.BAD_REQUEST)
+            return
+        origin = self.headers.get("Origin")
+        if origin:
+            origin_host = urlparse(origin).hostname or ""
+            if not (origin_host == "localhost" or origin_host == "::1" or origin_host.startswith("127.")):
+                self._serve_json({"error": "Cross-origin process actions are blocked."}, HTTPStatus.FORBIDDEN)
+                return
+        if not (self.headers.get("Content-Type") or "").startswith("application/json"):
+            self._serve_json({"error": "Expected application/json."}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+            return
+        try:
+            content_length = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            content_length = 0
+        if content_length <= 0 or content_length > 4096:
+            self._serve_json({"error": "Invalid request body."}, HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            payload = json.loads(self.rfile.read(content_length))
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object.")
+            action = str(payload.get("action") or "")
+            result = self.monitor_server.state.process_action(pid, action)
+        except json.JSONDecodeError:
+            self._serve_json({"error": "Invalid JSON body."}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as exc:
+            self._serve_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        except psutil.NoSuchProcess:
+            self._serve_json({"error": "Process no longer exists."}, HTTPStatus.NOT_FOUND)
+            return
+        except (psutil.AccessDenied, PermissionError) as exc:
+            self._serve_json({"error": str(exc) or "Process access denied."}, HTTPStatus.FORBIDDEN)
+            return
+        except Exception as exc:  # pragma: no cover - defensive for platform APIs.
+            self._serve_json_error(exc)
+            return
+        self._serve_json(result)
 
     def _serve_events(self, once: bool = False) -> None:
         self.send_response(HTTPStatus.OK)
@@ -136,8 +255,11 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             time.sleep(self.monitor_server.state.refresh_s)
 
     def _serve_json_error(self, exc: Exception) -> None:
-        body = json.dumps({"error": str(exc)}, ensure_ascii=False).encode("utf-8")
-        self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+        self._serve_json({"error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def _serve_json(self, payload, status: HTTPStatus = HTTPStatus.OK) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))

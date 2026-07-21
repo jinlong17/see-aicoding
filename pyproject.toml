@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "see-aicoding"
-version = "0.1.0"
-description = "Live system-wide monitor for Claude Code, Codex, and Cursor AI coding processes on macOS / Linux."
+version = "0.2.0"
+description = "Local system resource dashboard with AI coding workload context for macOS and Linux."
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [{ name = "jinlong17", email = "lijinlong1117@gmail.com" }]
-keywords = ["claude", "claude-code", "codex", "cursor", "ai", "monitor", "process", "tui"]
+keywords = ["system", "gpu", "cpu", "memory", "disk", "process", "monitor", "ai", "dashboard"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",

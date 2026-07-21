@@ -406,7 +406,16 @@ class ProcSample:
     cwd: str | None
     cpu_percent: float = 0.0
     rss: int = 0
+    vms: int = 0
+    memory_percent: float = 0.0
     num_threads: int = 0
+    username: str = ""
+    status: str = "unknown"
+    cpu_time_seconds: float = 0.0
+    read_bytes: int = 0
+    write_bytes: int = 0
+    read_bytes_per_s: float = 0.0
+    write_bytes_per_s: float = 0.0
     kind: str = KIND_OTHER
     session_id: str | None = None
     is_root: bool = False
@@ -449,9 +458,11 @@ class Session:
 class Sampler:
     """Holds persistent psutil.Process objects so cpu_percent() yields deltas."""
 
-    def __init__(self):
+    def __init__(self, include_all_users: bool = False):
+        self.include_all_users = include_all_users
         self._cache: dict[int, psutil.Process] = {}
         self._create_times: dict[int, float] = {}
+        self._io_counters: dict[int, tuple[int, int, float]] = {}
 
     def _get(self, pid: int) -> psutil.Process | None:
         proc = self._cache.get(pid)
@@ -479,7 +490,12 @@ class Sampler:
         for proc in psutil.process_iter(["pid", "username"]):
             try:
                 pid = proc.info["pid"]
-                if username is not None and proc.info.get("username") != username:
+                proc_username = proc.info.get("username") or ""
+                if (
+                    not self.include_all_users
+                    and username is not None
+                    and proc_username != username
+                ):
                     continue
                 alive.add(pid)
                 p = self._get(pid)
@@ -499,13 +515,44 @@ class Sampler:
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         cwd = None
                     try:
-                        mem = p.memory_info().rss
+                        memory_info = p.memory_info()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        mem = 0
+                        memory_info = None
                     try:
                         threads = p.num_threads()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         threads = 0
+                    try:
+                        status = p.status()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        status = "unknown"
+                    try:
+                        memory_percent = p.memory_percent()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        memory_percent = 0.0
+                    try:
+                        cpu_times = p.cpu_times()
+                        cpu_time_seconds = float(cpu_times.user + cpu_times.system)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        cpu_time_seconds = 0.0
+                    try:
+                        io_counters = p.io_counters()
+                        read_bytes = int(io_counters.read_bytes)
+                        write_bytes = int(io_counters.write_bytes)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                        read_bytes = 0
+                        write_bytes = 0
+
+                    sampled_at = time.monotonic()
+                    previous_io = self._io_counters.get(pid)
+                    read_rate = 0.0
+                    write_rate = 0.0
+                    if previous_io is not None:
+                        elapsed = max(0.001, sampled_at - previous_io[2])
+                        read_rate = max(0, read_bytes - previous_io[0]) / elapsed
+                        write_rate = max(0, write_bytes - previous_io[1]) / elapsed
+                    self._io_counters[pid] = (read_bytes, write_bytes, sampled_at)
+
                     sample = ProcSample(
                         pid=pid,
                         ppid=p.ppid(),
@@ -515,8 +562,17 @@ class Sampler:
                         create_time=self._create_times.get(pid, 0.0),
                         cwd=cwd,
                         cpu_percent=p.cpu_percent(interval=None),
-                        rss=mem,
+                        rss=memory_info.rss if memory_info else 0,
+                        vms=memory_info.vms if memory_info else 0,
+                        memory_percent=memory_percent,
                         num_threads=threads,
+                        username=proc_username,
+                        status=status,
+                        cpu_time_seconds=cpu_time_seconds,
+                        read_bytes=read_bytes,
+                        write_bytes=write_bytes,
+                        read_bytes_per_s=read_rate,
+                        write_bytes_per_s=write_rate,
                     )
                 sample.kind = classify(sample)
                 out[pid] = sample
@@ -525,6 +581,7 @@ class Sampler:
         for dead in set(self._cache) - alive:
             self._cache.pop(dead, None)
             self._create_times.pop(dead, None)
+            self._io_counters.pop(dead, None)
         return out
 
 
