@@ -19,7 +19,7 @@ from .render import render_all
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="see-aicoding",
-        description="Live system-wide monitor for Claude Code, Codex, and Cursor AI coding processes.",
+        description="Local system resource monitor with focused Claude, Codex, and Cursor workload context.",
     )
     p.add_argument("-i", "--interval", type=float, default=1.5,
                    help="Refresh interval in seconds (default 1.5).")
@@ -34,7 +34,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--full-screen", action="store_true",
                    help="Use alternate-screen mode (clears terminal on exit, no scrollback).")
     p.add_argument("--web", action="store_true",
-                   help="Run the local web monitor instead of the terminal dashboard.")
+                   help="Run the compact local system dashboard instead of the terminal AI view.")
     p.add_argument("--open", action="store_true",
                    help="Open the web monitor in the default browser (only with --web).")
     p.add_argument("--host", default="127.0.0.1",

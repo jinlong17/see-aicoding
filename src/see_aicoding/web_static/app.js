@@ -1,5 +1,15 @@
 "use strict";
 
+const SECTION_ORDER_DEFAULT = ["coding", "overview", "leaders", "processes", "storage", "runtime"];
+const SECTION_LABELS = {
+  coding: "AI workloads",
+  overview: "Activity and alerts",
+  leaders: "Top resource users",
+  processes: "Programs and processes",
+  storage: "Storage",
+  runtime: "Runtime",
+};
+
 const state = {
   snapshot: null,
   paused: false,
@@ -16,7 +26,7 @@ const state = {
   eventSource: null,
   fallbackTimer: null,
   thresholdRenderSignature: "",
-  historyRange: "1h",
+  historyRange: "live",
   historyModel: null,
   historyRequest: 0,
   services: null,
@@ -25,6 +35,15 @@ const state = {
   runtimeTimer: null,
   containers: null,
   containerTimer: null,
+  expandedAiSessions: new Set(),
+  preferences: {
+    density: "compact",
+    hidden_sections: [],
+    show_idle_ai: false,
+    section_order: [...SECTION_ORDER_DEFAULT],
+    process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
+  },
+  preferenceTimer: null,
 };
 
 const el = Object.fromEntries(
@@ -34,34 +53,39 @@ const el = Object.fromEntries(
     "gpuState", "gpuValue", "gpuDetail", "gpuChart", "gpuMeter",
     "memoryState", "memoryValue", "memoryDetail", "memoryChart", "memoryMeter",
     "storageState", "storageValue", "storageDetail", "storageChart", "storageMeter",
-    "systemChart", "diskReadRate", "diskWriteRate", "networkDownRate", "networkUpRate",
-    "updateTime", "runningProcesses", "threadCount", "swapUsage", "logicalCpus", "gpuProvider",
+    "networkValue", "networkDetail", "networkChart", "networkMeter",
+    "processValue", "processDetail", "processChart", "processMeter",
+    "resourceTrendChart", "diskReadRate", "diskWriteRate", "networkDownRate", "networkUpRate",
+    "updateTime", "gpuMetricCard", "gpuLegend",
     "topCpu", "topMemory", "topGpu", "processSummary", "processTotal", "processRunning",
     "processSearch", "processScope", "processStatus", "processTableHead", "processTableBody",
     "visibleProcessCount", "showMoreProcesses", "storageReadRate", "storageWriteRate",
     "storageIops", "storageLatency", "diskGrid", "diskIoChart", "sensorList",
     "smartProvider", "smartDeviceList", "deviceIoList", "aiTotals", "aiZones", "detailsDrawer",
     "alertBadge", "alertSummary", "activeAlerts", "thresholdGrid", "saveThresholds",
-    "eventCount", "eventTimeline", "persistentHistoryChart", "persistenceFacts",
+    "eventCount", "eventTimeline", "persistenceFacts",
     "runtimeSummary", "servicesProvider", "servicesNote", "serviceSearch",
     "refreshServices", "serviceTableBody", "serviceVisibleCount",
     "networkProvider", "networkSummary", "networkNote", "refreshNetwork",
     "networkTableBody", "networkVisibleCount",
     "containerProvider", "containerSummary", "containerNote", "refreshContainers",
-    "containerGrid",
+    "containerGrid", "containerPanel", "thirdLeaderCard", "thirdLeaderGlyph",
+    "thirdLeaderTitle", "thirdLeaderNote", "showIdleAiToggle", "customizeMenu",
+    "resetPreferences", "sectionOrderList",
     "drawerScrim", "detailsTitle", "detailsBody", "closeDetails", "toast",
   ].map((id) => [id, document.getElementById(id)])
 );
 
 const COLORS = {
-  cpu: "#58d6a5",
-  memory: "#dcbf71",
-  gpu: "#6fc8d8",
-  read: "#6fc8d8",
-  write: "#dcbf71",
+  cpu: "var(--resource-cpu)",
+  memory: "var(--resource-memory)",
+  gpu: "var(--resource-gpu)",
+  storage: "var(--resource-storage)",
+  network: "var(--resource-network)",
+  process: "var(--resource-process)",
+  read: "var(--io-read)",
+  write: "var(--io-write)",
 };
-
-let chartSequence = 0;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -97,7 +121,7 @@ function formatPct(value, digits = 1) {
 }
 
 function formatNumber(value) {
-  return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+  return new Intl.NumberFormat("en-US").format(Number(value || 0));
 }
 
 function formatDuration(seconds) {
@@ -107,16 +131,16 @@ function formatDuration(seconds) {
   const hours = Math.floor(remaining / 3600);
   remaining %= 3600;
   const minutes = Math.floor(remaining / 60);
-  if (days) return `${days}天 ${hours}小时`;
-  if (hours) return `${hours}小时 ${minutes}分`;
-  if (minutes) return `${minutes}分 ${remaining % 60}秒`;
-  return `${remaining}秒`;
+  if (days) return `${days}d ${hours}h`;
+  if (hours) return `${hours}h ${minutes}m`;
+  if (minutes) return `${minutes}m ${remaining % 60}s`;
+  return `${remaining}s`;
 }
 
 function formatEventTime(timestamp) {
   const date = new Date(Number(timestamp || 0) * 1000);
   if (Number.isNaN(date.getTime())) return "--";
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat("en-US", {
     month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
   }).format(date);
 }
@@ -134,25 +158,25 @@ function initials(value) {
 
 function statusLabel(status) {
   return {
-    running: "运行中",
-    sleeping: "睡眠",
-    stopped: "已暂停",
-    zombie: "僵尸",
-    idle: "空闲",
-    disk_sleep: "I/O 等待",
-    waking: "唤醒中",
-    locked: "锁定",
-    waiting: "等待",
-    unknown: "未知",
-  }[status] || status || "未知";
+    running: "Running",
+    sleeping: "Sleeping",
+    stopped: "Stopped",
+    zombie: "Zombie",
+    idle: "Idle",
+    disk_sleep: "I/O wait",
+    waking: "Waking",
+    locked: "Locked",
+    waiting: "Waiting",
+    unknown: "Unknown",
+  }[status] || status || "Unknown";
 }
 
 function pressureState(value, available = true) {
-  if (!available) return { label: "不可用", className: "" };
+  if (!available) return { label: "Unavailable", className: "" };
   const number = Number(value || 0);
-  if (number >= 85) return { label: "高压", className: "is-high" };
-  if (number >= 65) return { label: "偏高", className: "is-medium" };
-  return { label: "正常", className: "is-good" };
+  if (number >= 85) return { label: "High", className: "is-high" };
+  if (number >= 65) return { label: "Elevated", className: "is-medium" };
+  return { label: "Normal", className: "is-good" };
 }
 
 function setMetricState(node, value, available = true) {
@@ -163,6 +187,13 @@ function setMetricState(node, value, available = true) {
 
 function setMeter(node, value) {
   node.style.width = `${clamp(value)}%`;
+}
+
+function setGauge(node, value, label = null) {
+  const percent = clamp(value);
+  node.style.setProperty("--gauge-value", `${percent}%`);
+  const text = node.querySelector("span");
+  if (text) text.textContent = label ?? `${Math.round(percent)}%`;
 }
 
 function normalizedPoints(values, scaleMax, height = 40, width = 100, pad = 2) {
@@ -191,16 +222,9 @@ function renderChart(series, options = {}) {
     if (!points.length) return "";
     const pointText = points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
     const [lastX, lastY] = points[points.length - 1];
-    const gradientId = `chart-gradient-${chartSequence++}`;
     const areaPath = `M ${points[0][0].toFixed(2)} ${height} L ${pointText.replaceAll(",", " ")} L ${lastX.toFixed(2)} ${height} Z`;
     return `
-      <defs>
-        <linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="${item.color}" stop-opacity="0.62"></stop>
-          <stop offset="100%" stop-color="${item.color}" stop-opacity="0"></stop>
-        </linearGradient>
-      </defs>
-      ${item.fill === false ? "" : `<path class="chart-area" d="${areaPath}" fill="url(#${gradientId})"></path>`}
+      ${item.fill === false ? "" : `<path class="chart-area" d="${areaPath}" fill="${item.color}"></path>`}
       <polyline class="chart-line" points="${pointText}" style="--chart-color:${item.color}"></polyline>
       <circle class="chart-end" cx="${lastX.toFixed(2)}" cy="${lastY.toFixed(2)}" r="1.35" style="--chart-color:${item.color}"></circle>`;
   }).join("");
@@ -222,10 +246,10 @@ function showToast(message, isError = false) {
   showToast.timer = setTimeout(() => el.toast.classList.remove("is-visible"), 2200);
 }
 
-async function copyText(value, label = "已复制") {
+async function copyText(value, label = "Copied") {
   const text = String(value || "");
   if (!text) {
-    showToast("当前字段没有可复制内容", true);
+    showToast("There is nothing to copy", true);
     return;
   }
   try {
@@ -303,65 +327,130 @@ function renderOverview(snapshot) {
   const gpuValue = gpuAvailable ? Number(gpu.utilization_percent || 0) : 0;
   const diskValue = Number(systemDisk.percent || 0);
 
-  el.hostLine.textContent = `LOCAL SYSTEM · ${system.user || "user"}@${system.hostname || "localhost"} · ${system.platform || ""}`;
+  el.hostLine.textContent = `${system.user || "user"}@${system.hostname || "localhost"} · ${system.platform || "Local system"}`;
   el.factUptime.textContent = formatDuration(system.uptime_seconds || 0);
   el.factProcesses.textContent = formatNumber(processSummary.total || snapshot.processes?.items?.length || 0);
   el.factLoad.textContent = Number(cpu.load_1 || 0).toFixed(2);
 
   el.cpuValue.textContent = cpuValue.toFixed(0);
-  el.cpuDetail.textContent = `${system.physical_cpus || "--"} 个物理核心 · ${system.logical_cpus || "--"} 个逻辑核心${cpu.frequency_mhz ? ` · ${(cpu.frequency_mhz / 1000).toFixed(2)}GHz` : ""}`;
+  el.cpuDetail.textContent = `${system.physical_cpus || "--"} physical · ${system.logical_cpus || "--"} logical${cpu.frequency_mhz ? ` · ${(cpu.frequency_mhz / 1000).toFixed(2)}GHz` : ""}`;
   setMetricState(el.cpuState, cpuValue);
   setMeter(el.cpuMeter, cpuValue);
-  el.cpuChart.innerHTML = renderChart([{ values: history.cpu_percent || [], color: COLORS.cpu }], { scaleMax: 100 });
+  setGauge(el.cpuChart, cpuValue);
 
   el.gpuValue.textContent = gpuAvailable ? gpuValue.toFixed(0) : "--";
   const gpuDevice = gpu.devices?.[0];
   el.gpuDetail.textContent = gpuAvailable
-    ? `${gpuDevice?.name || "GPU"}${gpuDevice?.cores ? ` · ${gpuDevice.cores} 核心` : ""}${gpu.memory_used_bytes !== null && gpu.memory_used_bytes !== undefined ? ` · ${formatBytes(gpu.memory_used_bytes)} 已分配` : ""}`
-    : gpu.note || "未检测到受支持的 GPU 遥测提供器";
+    ? `${gpuDevice?.name || "GPU"} · ${gpu.provider || "provider"}${gpu.memory_used_bytes !== null && gpu.memory_used_bytes !== undefined ? ` · ${formatBytes(gpu.memory_used_bytes)} used` : ""}`
+    : gpu.note || "No supported GPU telemetry provider";
   setMetricState(el.gpuState, gpuValue, gpuAvailable);
   setMeter(el.gpuMeter, gpuValue);
-  el.gpuChart.innerHTML = renderChart([{ values: history.gpu_percent || [], color: COLORS.gpu }], { scaleMax: 100 });
+  setGauge(el.gpuChart, gpuValue, gpuAvailable ? null : "N/A");
+  el.gpuMetricCard.hidden = !gpuAvailable;
+  el.gpuLegend.hidden = !gpuAvailable;
 
   el.memoryValue.textContent = memoryValue.toFixed(0);
-  el.memoryDetail.textContent = `${formatBytes(memory.used_bytes)} 已用 · ${formatBytes(memory.available_bytes)} 可用 · 共 ${formatBytes(memory.total_bytes)}`;
+  el.memoryDetail.textContent = `${formatBytes(memory.used_bytes)} used · ${formatBytes(memory.available_bytes)} free${swap.total_bytes ? ` · swap ${formatPct(swap.percent, 0)}` : ""}`;
   setMetricState(el.memoryState, memoryValue);
   setMeter(el.memoryMeter, memoryValue);
-  el.memoryChart.innerHTML = renderChart([{ values: history.memory_percent || [], color: COLORS.memory }], { scaleMax: 100 });
+  setGauge(el.memoryChart, memoryValue);
 
   el.storageValue.textContent = disks.length ? diskValue.toFixed(0) : "--";
   el.storageDetail.textContent = disks.length
-    ? `${formatBytes(systemDisk.used_bytes)} 已用 · ${formatBytes(systemDisk.free_bytes)} 剩余 · ${systemDisk.mountpoint || "本地"}`
-    : "未读取到本地挂载点";
+    ? `${formatBytes(systemDisk.used_bytes)} used · ${formatBytes(systemDisk.free_bytes)} free · ${systemDisk.mountpoint || "Local"}`
+    : "No readable local mount point";
   setMetricState(el.storageState, diskValue, Boolean(disks.length));
   setMeter(el.storageMeter, diskValue);
-  el.storageChart.innerHTML = renderChart([
-    { values: history.disk_read_bytes_per_s || [], color: COLORS.read },
-    { values: history.disk_write_bytes_per_s || [], color: COLORS.write, fill: false },
-  ]);
+  setGauge(el.storageChart, diskValue, disks.length ? null : "N/A");
 
-  el.systemChart.classList.remove("skeleton-block");
-  el.systemChart.innerHTML = renderChart([
-    { values: history.cpu_percent || [], color: COLORS.cpu },
-    { values: history.memory_percent || [], color: COLORS.memory, fill: false },
-    { values: history.gpu_percent || [], color: COLORS.gpu, fill: false },
-  ], { scaleMax: 100, height: 64, grid: true });
+  const downloadRate = Number(network.download_bytes_per_s || 0);
+  const uploadRate = Number(network.upload_bytes_per_s || 0);
+  const combinedNetwork = downloadRate + uploadRate;
+  const networkHistory = (history.network_download_bytes_per_s || []).map((value, index) =>
+    Number(value || 0) + Number((history.network_upload_bytes_per_s || [])[index] || 0)
+  );
+  const networkPeak = Math.max(combinedNetwork, ...networkHistory, 1);
+  const networkGauge = combinedNetwork / networkPeak * 100;
+  el.networkValue.textContent = formatRate(combinedNetwork);
+  el.networkDetail.textContent = `Down ${formatRate(downloadRate)} · Up ${formatRate(uploadRate)}`;
+  setMeter(el.networkMeter, networkGauge);
+  setGauge(el.networkChart, networkGauge, "I/O");
+
+  const processTotal = Number(processSummary.total || snapshot.processes?.items?.length || 0);
+  const processRunning = Number(processSummary.running || 0);
+  const runningShare = processTotal ? processRunning / processTotal * 100 : 0;
+  el.processValue.textContent = formatNumber(processTotal);
+  el.processDetail.textContent = `${formatNumber(processRunning)} running · ${formatNumber(processSummary.threads || 0)} threads`;
+  setMeter(el.processMeter, runningShare);
+  setGauge(el.processChart, runningShare, `${formatNumber(processRunning)} run`);
+
+  if (state.historyRange === "live") {
+    const liveSeries = [
+      { values: history.cpu_percent || [], color: COLORS.cpu },
+      { values: history.memory_percent || [], color: COLORS.memory, fill: false },
+    ];
+    if (gpuAvailable) liveSeries.push({ values: history.gpu_percent || [], color: COLORS.gpu, fill: false });
+    el.resourceTrendChart.classList.remove("skeleton-block");
+    el.resourceTrendChart.innerHTML = renderChart(liveSeries, { scaleMax: 100, height: 64, grid: true });
+    el.persistenceFacts.innerHTML = `<span><b>${formatNumber(history.cpu_percent?.length || 0)}</b> in-memory samples</span><span><b>${Number(snapshot.refresh_interval || 0).toFixed(1)}s</b> refresh</span><span><b>Live</b> current session</span>`;
+  }
 
   el.diskReadRate.textContent = formatRate(diskIo.read_bytes_per_s || 0);
   el.diskWriteRate.textContent = formatRate(diskIo.write_bytes_per_s || 0);
   el.networkDownRate.textContent = formatRate(network.download_bytes_per_s || 0);
   el.networkUpRate.textContent = formatRate(network.upload_bytes_per_s || 0);
-  el.updateTime.textContent = new Date((snapshot.generated_at || 0) * 1000).toLocaleTimeString("zh-CN", { hour12: false });
-  el.runningProcesses.textContent = formatNumber(processSummary.running || 0);
-  el.threadCount.textContent = formatNumber(processSummary.threads || 0);
-  el.swapUsage.textContent = swap.total_bytes ? `${formatPct(swap.percent, 0)} · ${formatBytes(swap.used_bytes)}` : "未启用";
-  el.logicalCpus.textContent = formatNumber(system.logical_cpus || 0);
-  el.gpuProvider.textContent = gpu.provider || "none";
+  el.updateTime.textContent = new Date((snapshot.generated_at || 0) * 1000).toLocaleTimeString("en-US", { hour12: false });
 
   const resources = snapshot.resources || {};
   el.topCpu.innerHTML = renderLeaders(resources.top_cpu || [], "cpu");
   el.topMemory.innerHTML = renderLeaders(resources.top_memory || [], "memory");
-  el.topGpu.innerHTML = renderLeaders(resources.top_gpu || [], "gpu", gpu.note);
+  renderThirdLeader(resources, gpu);
+}
+
+function networkLeaderItems() {
+  return (state.networkAttribution?.items || []).filter((item) =>
+    Number(item.received_bytes_per_s || 0) + Number(item.sent_bytes_per_s || 0) > 0 || Number(item.connection_count || 0) > 0
+  );
+}
+
+function renderThirdLeader(resources, gpu) {
+  const gpuItems = resources.top_gpu || [];
+  if (gpuItems.length) {
+    el.thirdLeaderCard.classList.add("leader-gpu");
+    el.thirdLeaderCard.classList.remove("leader-network");
+    el.thirdLeaderGlyph.textContent = "G";
+    el.thirdLeaderTitle.textContent = "GPU";
+    el.thirdLeaderNote.textContent = "Attributed utilization";
+    el.topGpu.innerHTML = renderLeaders(gpuItems, "gpu", gpu.note);
+    return;
+  }
+  el.thirdLeaderCard.classList.add("leader-network");
+  el.thirdLeaderCard.classList.remove("leader-gpu");
+  el.thirdLeaderGlyph.textContent = "N";
+  el.thirdLeaderTitle.textContent = "Network";
+  el.thirdLeaderNote.textContent = state.networkAttribution?.throughput_available ? "Per-process throughput" : "Attributed sockets";
+  el.topGpu.innerHTML = renderNetworkLeaders(networkLeaderItems());
+}
+
+function renderNetworkLeaders(items) {
+  if (!items.length) return `<div class="empty-state compact">No attributable process network activity</div>`;
+  const throughput = Boolean(state.networkAttribution?.throughput_available);
+  const sorted = [...items].sort((a, b) => {
+    const aValue = throughput ? Number(a.received_bytes_per_s || 0) + Number(a.sent_bytes_per_s || 0) : Number(a.connection_count || 0);
+    const bValue = throughput ? Number(b.received_bytes_per_s || 0) + Number(b.sent_bytes_per_s || 0) : Number(b.connection_count || 0);
+    return bValue - aValue;
+  }).slice(0, 5);
+  const max = Math.max(1, ...sorted.map((item) => throughput
+    ? Number(item.received_bytes_per_s || 0) + Number(item.sent_bytes_per_s || 0)
+    : Number(item.connection_count || 0)));
+  return sorted.map((item, index) => {
+    const value = throughput ? Number(item.received_bytes_per_s || 0) + Number(item.sent_bytes_per_s || 0) : Number(item.connection_count || 0);
+    return `<button class="leader-row" data-pid="${Number(item.pid || 0)}" type="button" style="--leader-width:${Math.max(3, value / max * 100).toFixed(1)}%;--leader-color:${COLORS.network}">
+      <span class="leader-rank">${String(index + 1).padStart(2, "0")}</span>
+      <span class="leader-name">${escapeHtml(item.name || `PID ${item.pid}`)}<small>PID ${Number(item.pid || 0)} · ${formatNumber(item.connection_count || 0)} sockets</small></span>
+      <span class="leader-value">${throughput ? formatRate(value) : formatNumber(value)}</span>
+    </button>`;
+  }).join("");
 }
 
 function leaderMetric(item, type) {
@@ -375,14 +464,14 @@ function leaderMetric(item, type) {
 
 function renderLeaders(items, type, emptyNote = "") {
   if (!items.length) {
-    return `<div class="empty-state compact">${escapeHtml(emptyNote || "当前没有可归因的程序数据")}</div>`;
+    return `<div class="empty-state compact">${escapeHtml(emptyNote || "No attributable application data")}</div>`;
   }
   const metrics = items.map((item) => leaderMetric(item, type));
   const max = Math.max(1, ...metrics.map((metric) => metric.value));
   return items.slice(0, 5).map((item, index) => {
     const metric = metrics[index];
     const width = Math.max(3, Math.min(100, metric.value / max * 100));
-    const detail = item.process_count > 1 ? `${item.process_count} 个进程` : `PID ${item.primary_pid}`;
+    const detail = item.process_count > 1 ? `${item.process_count} processes` : `PID ${item.primary_pid}`;
     return `
       <button class="leader-row" data-pid="${Number(item.primary_pid || 0)}" type="button" style="--leader-width:${width.toFixed(1)}%;--leader-color:${type === "memory" ? COLORS.memory : type === "gpu" ? COLORS.gpu : COLORS.cpu}">
         <span class="leader-rank">${String(index + 1).padStart(2, "0")}</span>
@@ -418,6 +507,8 @@ function processSortValue(item, key, mode) {
   if (key === "memory") return Number(item.memory_bytes || 0);
   if (key === "gpu") return Number(item.gpu_percent ?? item.gpu_memory_bytes ?? 0);
   if (key === "disk") return Number(item.read_bytes_per_s || 0) + Number(item.write_bytes_per_s || 0);
+  if (key === "network") return networkForPids(mode === "programs" ? item.pids || [] : [item.pid]).total;
+  if (key === "threads") return Number(item.threads || 0);
   if (key === "age") return Number(item.age_seconds || 0);
   return Number(item.cpu_capacity_percent || 0);
 }
@@ -428,7 +519,7 @@ function sortedProcessItems(items, mode) {
     const aValue = processSortValue(a, state.processSortKey, mode);
     const bValue = processSortValue(b, state.processSortKey, mode);
     if (typeof aValue === "string") {
-      const result = aValue.localeCompare(bValue, "zh-CN");
+      const result = aValue.localeCompare(bValue, "en-US");
       if (result) return result * direction;
     } else if (aValue !== bValue) {
       return (aValue - bValue) * direction;
@@ -443,29 +534,29 @@ function sortButton(key, label, numeric = false) {
   return `<button class="sort-control ${active ? "is-active" : ""}" data-process-sort="${key}" type="button"><span>${escapeHtml(label)}</span><span aria-hidden="true">${marker}</span></button>`;
 }
 
+function selectedProcessColumns(mode) {
+  const selected = new Set(state.preferences.process_columns || []);
+  selected.add("identity");
+  const gpuAvailable = Boolean(state.snapshot?.system?.gpu?.available);
+  const networkAvailable = Boolean(state.networkAttribution?.available && state.networkAttribution?.items?.length);
+  const order = mode === "programs"
+    ? ["identity", "pid", "user", "cpu", "memory", "gpu", "disk", "network"]
+    : ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"];
+  return order.filter((key) => selected.has(key) && (key !== "gpu" || gpuAvailable) && (key !== "network" || networkAvailable));
+}
+
+function processHeadCell(key, mode) {
+  const numeric = ["pid", "cpu", "memory", "gpu", "disk", "network", "threads", "age"].includes(key);
+  const labels = mode === "programs"
+    ? { identity: "Application / command", pid: "Procs", user: "User", cpu: "CPU", memory: "Memory", gpu: "GPU", disk: "Disk R/W", network: "Network ↓/↑" }
+    : { identity: mode === "tree" ? "Process tree / command" : "Process / command", pid: "PID / PPID", user: "User", state: "State", cpu: "CPU", memory: "RSS", gpu: "GPU", disk: "Disk R/W", network: "Network ↓/↑", threads: "Threads", age: "Age" };
+  const sortable = ["identity", "pid", "cpu", "memory", "gpu", "disk", "network", "threads", "age"].includes(key);
+  const sortKey = key === "identity" ? "name" : key;
+  return `<th class="${numeric ? "num" : ""}">${sortable ? sortButton(sortKey, labels[key] || key) : escapeHtml(labels[key] || key)}</th>`;
+}
+
 function renderProcessHead(mode) {
-  if (mode === "programs") {
-    return `<tr>
-      <th style="width:29%">${sortButton("name", "程序")}</th>
-      <th style="width:9%">进程</th>
-      <th style="width:13%">用户</th>
-      <th class="num" style="width:12%">${sortButton("cpu", "CPU")}</th>
-      <th class="num" style="width:14%">${sortButton("memory", "内存")}</th>
-      <th class="num" style="width:10%">${sortButton("gpu", "GPU")}</th>
-      <th class="num" style="width:13%">${sortButton("disk", "磁盘 I/O")}</th>
-    </tr>`;
-  }
-  return `<tr>
-    <th style="width:25%">${sortButton("name", mode === "tree" ? "进程树" : "进程")}</th>
-    <th style="width:8%">${sortButton("pid", "PID")}</th>
-    <th style="width:11%">用户</th>
-    <th style="width:10%">状态</th>
-    <th class="num" style="width:10%">${sortButton("cpu", "CPU")}</th>
-    <th class="num" style="width:13%">${sortButton("memory", "内存")}</th>
-    <th class="num" style="width:9%">${sortButton("gpu", "GPU")}</th>
-    <th class="num" style="width:9%">${sortButton("disk", "I/O")}</th>
-    <th class="num" style="width:9%">${sortButton("age", "运行时间")}</th>
-  </tr>`;
+  return `<tr>${selectedProcessColumns(mode).map((key) => processHeadCell(key, mode)).join("")}</tr>`;
 }
 
 function usageCell(value, label, color = COLORS.cpu) {
@@ -473,40 +564,58 @@ function usageCell(value, label, color = COLORS.cpu) {
   return `<div class="usage-cell"><span class="usage-bar"><span style="width:${percent}%;background:${color}"></span></span><span class="mono">${escapeHtml(label)}</span></div>`;
 }
 
+function networkForPids(pids) {
+  const wanted = new Set((pids || []).map(Number));
+  const matched = (state.networkAttribution?.items || []).filter((item) => wanted.has(Number(item.pid)));
+  const down = matched.reduce((sum, item) => sum + Number(item.received_bytes_per_s || 0), 0);
+  const up = matched.reduce((sum, item) => sum + Number(item.sent_bytes_per_s || 0), 0);
+  return { down, up, total: down + up, connections: matched.reduce((sum, item) => sum + Number(item.connection_count || 0), 0) };
+}
+
+function ratePair(down, up) {
+  return `<span class="stacked-stat"><span>↓ ${formatRate(down)}</span><span>↑ ${formatRate(up)}</span></span>`;
+}
+
 function renderProgramRow(item) {
   const users = item.usernames || [];
-  const ioRate = Number(item.read_bytes_per_s || 0) + Number(item.write_bytes_per_s || 0);
   const gpuLabel = item.gpu_percent !== null && item.gpu_percent !== undefined
     ? formatPct(item.gpu_percent)
     : item.gpu_memory_bytes ? formatBytes(item.gpu_memory_bytes) : "--";
-  return `<tr class="process-row" data-pid="${Number(item.primary_pid || 0)}" tabindex="0">
-    <td><div class="process-name-cell"><span class="process-avatar">${escapeHtml(initials(item.label))}</span><span class="process-name">${escapeHtml(item.label || "未知程序")}<span class="process-sub">PID ${Number(item.primary_pid || 0)}</span></span></div></td>
-    <td class="mono">${formatNumber(item.process_count || 0)}</td>
-    <td title="${escapeHtml(users.join(", "))}">${escapeHtml(users.length > 1 ? `${users[0]} +${users.length - 1}` : users[0] || "--")}</td>
-    <td class="num">${usageCell(item.cpu_capacity_percent || 0, formatPct(item.cpu_capacity_percent || 0))}</td>
-    <td class="num mono">${formatBytes(item.memory_bytes || 0)}</td>
-    <td class="num mono">${gpuLabel}</td>
-    <td class="num mono">${formatRate(ioRate)}</td>
-  </tr>`;
+  const network = networkForPids(item.pids || []);
+  const cells = {
+    identity: `<td><div class="process-name-cell"><span class="process-avatar">${escapeHtml(initials(item.label))}</span><span class="process-name">${escapeHtml(item.label || "Unknown application")}<span class="process-sub">PID ${Number(item.primary_pid || 0)} · ${escapeHtml(item.detail || "grouped application")}</span></span></div></td>`,
+    pid: `<td class="num mono">${formatNumber(item.process_count || 0)}</td>`,
+    user: `<td title="${escapeHtml(users.join(", "))}">${escapeHtml(users.length > 1 ? `${users[0]} +${users.length - 1}` : users[0] || "--")}</td>`,
+    cpu: `<td class="num">${usageCell(item.cpu_capacity_percent || 0, formatPct(item.cpu_capacity_percent || 0))}</td>`,
+    memory: `<td class="num mono">${formatBytes(item.memory_bytes || 0)}</td>`,
+    gpu: `<td class="num mono">${gpuLabel}</td>`,
+    disk: `<td class="num mono">${ratePair(item.read_bytes_per_s || 0, item.write_bytes_per_s || 0)}</td>`,
+    network: `<td class="num mono">${ratePair(network.down, network.up)}</td>`,
+  };
+  return `<tr class="process-row" data-pid="${Number(item.primary_pid || 0)}" tabindex="0">${selectedProcessColumns("programs").map((key) => cells[key] || "").join("")}</tr>`;
 }
 
 function renderProcessRow(item, treeDepth = null, hasChildren = false) {
-  const ioRate = Number(item.read_bytes_per_s || 0) + Number(item.write_bytes_per_s || 0);
   const gpuLabel = item.gpu_percent !== null && item.gpu_percent !== undefined
     ? formatPct(item.gpu_percent)
     : item.gpu_memory_bytes ? formatBytes(item.gpu_memory_bytes) : "--";
   const treePrefix = treeDepth === null ? "" : `<span class="tree-indent" style="--tree-depth:${Math.min(12, treeDepth)}"><i>${hasChildren ? "⌄" : "·"}</i></span>`;
-  return `<tr class="process-row ${treeDepth === null ? "" : "tree-row"}" data-pid="${Number(item.pid || 0)}" tabindex="0">
-    <td title="${escapeHtml(item.cmdline || "")}"><div class="process-name-cell">${treePrefix}<span class="process-avatar">${escapeHtml(initials(item.label || item.name))}</span><span class="process-name">${escapeHtml(item.label || item.name || `PID ${item.pid}`)}<span class="process-sub">${treeDepth === null ? "" : `PPID ${Number(item.ppid || 0)} · `}${escapeHtml(item.cmdline || item.exe || "无命令信息")}</span></span></div></td>
-    <td class="mono">${Number(item.pid || 0)}</td>
-    <td title="${escapeHtml(item.username || "")}">${escapeHtml(item.username || "--")}</td>
-    <td><span class="status-badge status-${escapeHtml(item.status || "unknown")}">${escapeHtml(statusLabel(item.status))}</span></td>
-    <td class="num">${usageCell(item.cpu_capacity_percent || 0, formatPct(item.cpu_capacity_percent || 0))}</td>
-    <td class="num mono">${formatBytes(item.memory_bytes || 0)}</td>
-    <td class="num mono">${gpuLabel}</td>
-    <td class="num mono">${formatRate(ioRate)}</td>
-    <td class="num mono">${formatDuration(item.age_seconds || 0)}</td>
-  </tr>`;
+  const network = networkForPids([item.pid]);
+  const mode = treeDepth === null ? "processes" : "tree";
+  const cells = {
+    identity: `<td title="${escapeHtml(item.cmdline || "")}"><div class="process-name-cell">${treePrefix}<span class="process-avatar">${escapeHtml(initials(item.label || item.name))}</span><span class="process-name">${escapeHtml(item.label || item.name || `PID ${item.pid}`)}<span class="process-sub">${escapeHtml(item.cmdline || "Command unavailable")}</span></span></div></td>`,
+    pid: `<td class="num mono"><span class="stacked-stat"><span>${Number(item.pid || 0)}</span><span>ppid ${Number(item.ppid || 0)}</span></span></td>`,
+    user: `<td title="${escapeHtml(item.username || "")}">${escapeHtml(item.username || "--")}</td>`,
+    state: `<td><span class="status-badge status-${escapeHtml(item.status || "unknown")}">${escapeHtml(statusLabel(item.status))}</span></td>`,
+    cpu: `<td class="num">${usageCell(item.cpu_capacity_percent || 0, formatPct(item.cpu_capacity_percent || 0))}</td>`,
+    memory: `<td class="num mono">${formatBytes(item.memory_bytes || 0)}</td>`,
+    gpu: `<td class="num mono">${gpuLabel}</td>`,
+    disk: `<td class="num mono">${ratePair(item.read_bytes_per_s || 0, item.write_bytes_per_s || 0)}</td>`,
+    network: `<td class="num mono">${ratePair(network.down, network.up)}</td>`,
+    threads: `<td class="num mono">${formatNumber(item.threads || 0)}</td>`,
+    age: `<td class="num mono">${formatDuration(item.age_seconds || 0)}</td>`,
+  };
+  return `<tr class="process-row ${treeDepth === null ? "" : "tree-row"}" data-pid="${Number(item.pid || 0)}" tabindex="0">${selectedProcessColumns(mode).map((key) => cells[key] || "").join("")}</tr>`;
 }
 
 function processTreeRows(items) {
@@ -560,16 +669,16 @@ function renderProcesses(snapshot) {
   const summary = snapshot.system?.process_summary || {};
   const tree = snapshot.processes?.tree || {};
 
-  el.processSummary.textContent = mode === "programs" ? `${formatNumber(source.length)} 个程序组，辅助进程已按应用归并。`
-    : mode === "tree" ? `${formatNumber(tree.root_count || 0)} 个根节点 · 最大 ${formatNumber(tree.max_depth || 0)} 层；筛选结果会保留父级上下文。`
-    : `${formatNumber(source.length)} 个可读取进程，点击任意行查看完整资源详情。`;
+  el.processSummary.textContent = mode === "programs" ? `${formatNumber(source.length)} application groups with helper processes merged.`
+    : mode === "tree" ? `${formatNumber(tree.root_count || 0)} roots · ${formatNumber(tree.max_depth || 0)} levels; filters retain parent context.`
+    : `${formatNumber(source.length)} readable processes. Select a row for full resource details.`;
   el.processTotal.textContent = formatNumber(summary.total || snapshot.processes?.items?.length || 0);
   el.processRunning.textContent = formatNumber(summary.running || 0);
   el.processTableHead.innerHTML = renderProcessHead(mode);
   el.processTableBody.innerHTML = visible.length
     ? visible.map((row) => mode === "programs" ? renderProgramRow(row) : mode === "tree" ? renderProcessRow(row.item, row.depth, row.hasChildren) : renderProcessRow(row)).join("")
-    : `<tr><td colspan="9"><div class="empty-state">没有匹配当前筛选条件的${mode === "programs" ? "程序" : "进程"}</div></td></tr>`;
-  el.visibleProcessCount.textContent = `显示 ${formatNumber(visible.length)} / ${formatNumber(filtered.length)}`;
+    : `<tr><td colspan="${selectedProcessColumns(mode).length}"><div class="empty-state">No ${mode === "programs" ? "applications" : "processes"} match the current filters</div></td></tr>`;
+  el.visibleProcessCount.textContent = `Showing ${formatNumber(visible.length)} of ${formatNumber(filtered.length)}`;
   el.showMoreProcesses.hidden = visible.length >= filtered.length;
   document.querySelectorAll("[data-process-mode]").forEach((button) => button.classList.toggle("is-active", button.dataset.processMode === mode));
   document.querySelectorAll(".process-only").forEach((node) => { node.hidden = mode === "programs"; });
@@ -588,16 +697,16 @@ function renderStorage(snapshot) {
   el.diskGrid.innerHTML = disks.length ? disks.map((disk) => `
     <article class="disk-card">
       <div class="disk-head">
-        <div class="disk-label"><h3>${escapeHtml(disk.mountpoint || disk.device || "本地磁盘")}</h3><p>${escapeHtml([disk.device, disk.filesystem, disk.is_system ? "系统卷" : ""].filter(Boolean).join(" · "))}</p></div>
+        <div class="disk-label"><h3>${escapeHtml(disk.mountpoint || disk.device || "Local disk")}</h3><p>${escapeHtml([disk.device, disk.filesystem, disk.is_system ? "System volume" : ""].filter(Boolean).join(" · "))}</p></div>
         <span class="disk-percent">${formatPct(disk.percent || 0, 0)}</span>
       </div>
-      <div class="capacity-bar" aria-label="已使用 ${formatPct(disk.percent || 0, 0)}"><span style="width:${clamp(disk.percent)}%"></span></div>
+      <div class="capacity-bar" aria-label="${formatPct(disk.percent || 0, 0)} used"><span style="width:${clamp(disk.percent)}%"></span></div>
       <div class="disk-numbers">
-        <span>总容量<b>${formatBytes(disk.total_bytes || 0)}</b></span>
-        <span>已使用<b>${formatBytes(disk.used_bytes || 0)}</b></span>
-        <span>剩余<b>${formatBytes(disk.free_bytes || 0)}</b></span>
+        <span>Total<b>${formatBytes(disk.total_bytes || 0)}</b></span>
+        <span>Used<b>${formatBytes(disk.used_bytes || 0)}</b></span>
+        <span>Free<b>${formatBytes(disk.free_bytes || 0)}</b></span>
       </div>
-    </article>`).join("") : `<div class="empty-state">没有可读取的本地挂载点</div>`;
+    </article>`).join("") : `<div class="empty-state">No readable local mount points</div>`;
 
   el.diskIoChart.innerHTML = renderChart([
     { values: history.disk_read_bytes_per_s || [], color: COLORS.read },
@@ -607,49 +716,50 @@ function renderStorage(snapshot) {
   el.smartProvider.textContent = storageHealth.available ? `SMART · ${String(storageHealth.provider || "provider").toUpperCase()}` : "SMART · UNAVAILABLE";
   const smartDevices = storageHealth.devices || [];
   el.smartDeviceList.innerHTML = smartDevices.length ? smartDevices.map((device) => {
-    const healthLabel = device.health === "passed" ? "健康" : device.health === "failed" ? "故障" : "未知";
+    const healthLabel = device.health === "passed" ? "Healthy" : device.health === "failed" ? "Failed" : "Unknown";
     const details = [
       device.temperature_c !== null && device.temperature_c !== undefined ? `${Number(device.temperature_c).toFixed(1)}°C` : null,
-      device.percentage_used !== null && device.percentage_used !== undefined ? `寿命已用 ${Number(device.percentage_used).toFixed(0)}%` : null,
-      device.available_spare_percent !== null && device.available_spare_percent !== undefined ? `备用 ${Number(device.available_spare_percent).toFixed(0)}%` : null,
-      device.media_errors !== null && device.media_errors !== undefined ? `介质错误 ${formatNumber(device.media_errors)}` : null,
+      device.percentage_used !== null && device.percentage_used !== undefined ? `${Number(device.percentage_used).toFixed(0)}% life used` : null,
+      device.available_spare_percent !== null && device.available_spare_percent !== undefined ? `${Number(device.available_spare_percent).toFixed(0)}% spare` : null,
+      device.media_errors !== null && device.media_errors !== undefined ? `${formatNumber(device.media_errors)} media errors` : null,
     ].filter(Boolean);
     return `<div class="device-row">
       <div class="device-title"><strong>${escapeHtml(device.model || device.identifier || device.device)}</strong><span>${escapeHtml([device.device, device.protocol, device.solid_state === true ? "SSD" : device.solid_state === false ? "HDD" : ""].filter(Boolean).join(" · "))}</span></div>
       <span class="health-badge is-${escapeHtml(device.health || "unknown")}">${healthLabel} · ${escapeHtml(device.smart_status || "Unknown")}</span>
-      <div class="device-metrics">${details.length ? details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join("") : `<span>提供器未返回详细 SMART 属性</span>`}</div>
+      <div class="device-metrics">${details.length ? details.map((detail) => `<span>${escapeHtml(detail)}</span>`).join("") : `<span>The provider returned no detailed SMART attributes</span>`}</div>
     </div>`;
-  }).join("") : `<div class="empty-state compact">${escapeHtml(storageHealth.note || "当前设备没有可读取的 SMART 数据")}</div>`;
+  }).join("") : `<div class="empty-state compact">${escapeHtml(storageHealth.note || "No readable SMART data for this device")}</div>`;
 
   const ioDevices = diskIo.devices || [];
   el.deviceIoList.innerHTML = ioDevices.length ? ioDevices.map((device) => `
     <div class="device-row io-device-row">
-      <div class="device-title"><strong>${escapeHtml(device.device || "disk")}</strong><span>${formatRate(Number(device.read_bytes_per_s || 0) + Number(device.write_bytes_per_s || 0))} 总吞吐</span></div>
+      <div class="device-title"><strong>${escapeHtml(device.device || "disk")}</strong><span>${formatRate(Number(device.read_bytes_per_s || 0) + Number(device.write_bytes_per_s || 0))} total throughput</span></div>
       <div class="device-metrics io-device-metrics">
-        <span>读 <b>${Number(device.read_iops || 0).toFixed(1)}</b> IOPS · <b>${Number(device.read_latency_ms || 0).toFixed(2)}</b> ms</span>
-        <span>写 <b>${Number(device.write_iops || 0).toFixed(1)}</b> IOPS · <b>${Number(device.write_latency_ms || 0).toFixed(2)}</b> ms</span>
+        <span>Read <b>${Number(device.read_iops || 0).toFixed(1)}</b> IOPS · <b>${Number(device.read_latency_ms || 0).toFixed(2)}</b> ms</span>
+        <span>Write <b>${Number(device.write_iops || 0).toFixed(1)}</b> IOPS · <b>${Number(device.write_latency_ms || 0).toFixed(2)}</b> ms</span>
       </div>
-    </div>`).join("") : `<div class="empty-state compact">当前平台没有暴露设备级 I/O 计数器</div>`;
+    </div>`).join("") : `<div class="empty-state compact">This platform exposes no device-level I/O counters</div>`;
 
   const sensors = system.sensors || [];
   const battery = system.battery;
   const rows = sensors.map((sensor) => `
     <div class="sensor-row"><span>${escapeHtml(sensor.label || sensor.group)}</span><b>${Number(sensor.current_c || 0).toFixed(1)}°C</b></div>`);
-  if (battery) rows.push(`<div class="sensor-row"><span>电池${battery.plugged ? " · 已接电源" : ""}</span><b>${formatPct(battery.percent, 0)}</b></div>`);
-  el.sensorList.innerHTML = rows.length ? rows.join("") : `<div class="empty-state compact">当前平台没有暴露可读取的温度或电池传感器</div>`;
+  if (battery) rows.push(`<div class="sensor-row"><span>Battery${battery.plugged ? " · plugged in" : ""}</span><b>${formatPct(battery.percent, 0)}</b></div>`);
+  el.sensorList.hidden = rows.length === 0;
+  el.sensorList.innerHTML = rows.join("");
 }
 
 function serviceStateLabel(stateValue, subState = "") {
   const key = String(stateValue || "unknown");
   const label = {
-    running: "运行中",
-    active: "活跃",
-    inactive: "未运行",
-    exited: "已退出",
-    failed: "失败",
-    activating: "启动中",
-    deactivating: "停止中",
-    reloading: "重载中",
+    running: "Running",
+    active: "Active",
+    inactive: "Inactive",
+    exited: "Exited",
+    failed: "Failed",
+    activating: "Starting",
+    deactivating: "Stopping",
+    reloading: "Reloading",
   }[key] || key;
   return subState && subState !== key ? `${label} · ${subState}` : label;
 }
@@ -661,7 +771,7 @@ function renderServices(model) {
   const items = source.filter((item) => [item.name, item.id, item.description, item.state, item.sub_state]
     .join(" ").toLowerCase().includes(query));
   el.servicesProvider.textContent = model?.available ? `${String(model.provider || "service manager").toUpperCase()} · ${String(model.scope || "")}` : "UNAVAILABLE";
-  el.servicesNote.textContent = model?.note || "当前平台没有可用的系统服务提供器。";
+  el.servicesNote.textContent = model?.note || "No system service provider is available on this platform.";
   renderRuntimeSummary();
   el.serviceTableBody.innerHTML = items.length ? items.map((item) => {
     const statusClass = item.state === "running" || item.state === "active" ? "running" : item.state === "failed" ? "zombie" : "stopped";
@@ -672,30 +782,32 @@ function renderServices(model) {
       <td class="num mono">${item.status_code === null || item.status_code === undefined ? "--" : Number(item.status_code)}</td>
       <td>${escapeHtml(item.scope || model.scope || "--")}</td>
     </tr>`;
-  }).join("") : `<tr><td colspan="5"><div class="empty-state">${model?.available ? "没有匹配的系统服务" : escapeHtml(model?.note || "服务清单不可用")}</div></td></tr>`;
-  el.serviceVisibleCount.textContent = `显示 ${formatNumber(items.length)} / ${formatNumber(source.length)}`;
+  }).join("") : `<tr><td colspan="5"><div class="empty-state">${model?.available ? "No system services match the search" : escapeHtml(model?.note || "Service inventory unavailable")}</div></td></tr>`;
+  el.serviceVisibleCount.textContent = `Showing ${formatNumber(items.length)} of ${formatNumber(source.length)}`;
 }
 
 function renderRuntimeSummary() {
   const serviceSummary = state.services?.summary || {};
   const networkSummaryModel = state.networkAttribution?.summary || {};
   const containerSummaryModel = state.containers?.summary || {};
-  el.runtimeSummary.innerHTML = `
-    <span><b>${state.services?.available ? formatNumber(serviceSummary.running || 0) : "--"}</b> 运行服务</span>
-    <span><b>${state.networkAttribution?.available ? formatNumber(networkSummaryModel.process_count || 0) : "--"}</b> 网络进程</span>
-    <span><b>${state.containers?.available ? formatNumber(containerSummaryModel.running || 0) : "--"}</b> 运行容器</span>`;
+  const facts = [];
+  if (state.services?.available) facts.push(`<span><b>${formatNumber(serviceSummary.running || 0)}</b> running services</span>`);
+  if (state.networkAttribution?.available) facts.push(`<span><b>${formatNumber(networkSummaryModel.process_count || 0)}</b> network processes</span>`);
+  if (state.containers?.installed) facts.push(`<span><b>${formatNumber(containerSummaryModel.running || 0)}</b> running containers</span>`);
+  el.runtimeSummary.innerHTML = facts.join("") || `<span><b>0</b> available providers</span>`;
 }
 
 function renderContainers(model) {
   const summary = model?.summary || {};
   const items = model?.items || [];
+  el.containerPanel.hidden = model?.installed === false;
   el.containerProvider.textContent = `${String(model?.provider || "CONTAINER RUNTIME").toUpperCase()} · ${model?.available ? "CONNECTED" : model?.installed ? "OFFLINE" : "NOT INSTALLED"}`;
-  el.containerNote.textContent = model?.note || "没有可用的容器运行时。";
+  el.containerNote.textContent = model?.note || "No container runtime is available.";
   el.containerSummary.innerHTML = `
-    <span><small>运行中</small><b>${model?.available ? `${formatNumber(summary.running || 0)} / ${formatNumber(summary.total || 0)}` : "--"}</b></span>
+    <span><small>Running</small><b>${model?.available ? `${formatNumber(summary.running || 0)} / ${formatNumber(summary.total || 0)}` : "--"}</b></span>
     <span><small>CPU</small><b>${model?.metrics_available ? formatPct(summary.cpu_percent || 0) : "--"}</b></span>
-    <span><small>内存</small><b>${model?.metrics_available ? formatBytes(summary.memory_usage_bytes || 0) : "--"}</b></span>
-    <span><small>累计网络 I/O</small><b>${model?.metrics_available ? `${formatBytes(summary.network_received_bytes || 0)} ↓ · ${formatBytes(summary.network_sent_bytes || 0)} ↑` : "--"}</b></span>`;
+    <span><small>Memory</small><b>${model?.metrics_available ? formatBytes(summary.memory_usage_bytes || 0) : "--"}</b></span>
+    <span><small>Network I/O</small><b>${model?.metrics_available ? `${formatBytes(summary.network_received_bytes || 0)} ↓ · ${formatBytes(summary.network_sent_bytes || 0)} ↑` : "--"}</b></span>`;
   el.containerGrid.innerHTML = items.length ? items.map((item) => `
     <article class="container-card ${item.running ? "is-running" : ""}">
       <div class="container-head">
@@ -704,12 +816,12 @@ function renderContainers(model) {
       </div>
       <div class="container-metrics">
         <span><small>CPU</small><b>${item.cpu_percent === null || item.cpu_percent === undefined ? "--" : formatPct(item.cpu_percent)}</b></span>
-        <span><small>内存</small><b>${item.memory_usage_bytes === null || item.memory_usage_bytes === undefined ? "--" : formatBytes(item.memory_usage_bytes)}</b></span>
-        <span><small>网络</small><b>${item.network_received_bytes === null || item.network_received_bytes === undefined ? "--" : `${formatBytes(item.network_received_bytes)} / ${formatBytes(item.network_sent_bytes || 0)}`}</b></span>
+        <span><small>Memory</small><b>${item.memory_usage_bytes === null || item.memory_usage_bytes === undefined ? "--" : formatBytes(item.memory_usage_bytes)}</b></span>
+        <span><small>Network</small><b>${item.network_received_bytes === null || item.network_received_bytes === undefined ? "--" : `${formatBytes(item.network_received_bytes)} / ${formatBytes(item.network_sent_bytes || 0)}`}</b></span>
         <span><small>PIDs</small><b>${formatNumber(item.pid_count || 0)}</b></span>
       </div>
-      <div class="container-foot"><span>${escapeHtml(item.status || "--")}</span><span title="${escapeHtml(item.ports || "")}">${escapeHtml(item.ports || "无端口映射")}</span></div>
-    </article>`).join("") : `<div class="empty-state container-empty">${escapeHtml(model?.note || "当前没有容器")}</div>`;
+      <div class="container-foot"><span>${escapeHtml(item.status || "--")}</span><span title="${escapeHtml(item.ports || "")}">${escapeHtml(item.ports || "No published ports")}</span></div>
+    </article>`).join("") : `<div class="empty-state container-empty">${escapeHtml(model?.note || "No containers")}</div>`;
   renderRuntimeSummary();
 }
 
@@ -718,12 +830,12 @@ function renderNetworkAttribution(model) {
   const items = (model?.items || []).slice(0, 120);
   const throughput = Boolean(model?.throughput_available);
   el.networkProvider.textContent = `${String(model?.provider || "NETWORK").toUpperCase()} · ${throughput ? "THROUGHPUT" : "CONNECTIONS"}`;
-  el.networkNote.textContent = model?.note || "逐进程网络归因不可用。";
+  el.networkNote.textContent = model?.note || "Per-process network attribution is unavailable.";
   el.networkSummary.innerHTML = `
-    <span><small>归因下行</small><b>${throughput ? formatRate(summary.received_bytes_per_s || 0) : "连接模式"}</b></span>
-    <span><small>归因上行</small><b>${throughput ? formatRate(summary.sent_bytes_per_s || 0) : "连接模式"}</b></span>
-    <span><small>连接</small><b>${formatNumber(summary.connection_count || 0)}</b></span>
-    <span><small>网络进程</small><b>${formatNumber(summary.process_count || 0)}</b></span>`;
+    <span><small>Download</small><b>${throughput ? formatRate(summary.received_bytes_per_s || 0) : "Sockets only"}</b></span>
+    <span><small>Upload</small><b>${throughput ? formatRate(summary.sent_bytes_per_s || 0) : "Sockets only"}</b></span>
+    <span><small>Connections</small><b>${formatNumber(summary.connection_count || 0)}</b></span>
+    <span><small>Processes</small><b>${formatNumber(summary.process_count || 0)}</b></span>`;
   el.networkTableBody.innerHTML = items.length ? items.map((item) => {
     const endpoints = item.remote_endpoints || [];
     return `<tr>
@@ -734,9 +846,13 @@ function renderNetworkAttribution(model) {
       <td class="num mono">${formatNumber(item.connection_count || 0)}</td>
       <td title="${escapeHtml(endpoints.join(", "))}"><span class="endpoint-list">${escapeHtml(endpoints.slice(0, 2).join(" · ") || "--")}</span></td>
     </tr>`;
-  }).join("") : `<tr><td colspan="6"><div class="empty-state">${escapeHtml(model?.note || "没有可读取的逐进程网络活动")}</div></td></tr>`;
-  el.networkVisibleCount.textContent = `显示 ${formatNumber(items.length)} / ${formatNumber(model?.items?.length || 0)}${throughput ? " · 字节率每 4 秒刷新" : " · 吞吐归因不可用"}`;
+  }).join("") : `<tr><td colspan="6"><div class="empty-state">${escapeHtml(model?.note || "No readable per-process network activity")}</div></td></tr>`;
+  el.networkVisibleCount.textContent = `Showing ${formatNumber(items.length)} of ${formatNumber(model?.items?.length || 0)}${throughput ? " · rates refresh every 4 seconds" : " · throughput attribution unavailable"}`;
   renderRuntimeSummary();
+  if (state.snapshot) {
+    renderThirdLeader(state.snapshot.resources || {}, state.snapshot.system?.gpu || {});
+    renderProcesses(state.snapshot);
+  }
 }
 
 function renderRuntime() {
@@ -752,10 +868,10 @@ async function fetchServices(force = false) {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     state.services = payload;
-    if (state.view === "runtime") renderServices(payload);
+    renderServices(payload);
   } catch (error) {
-    state.services = { available: false, items: [], summary: {}, note: error.message || "服务读取失败" };
-    if (state.view === "runtime") renderServices(state.services);
+    state.services = { available: false, items: [], summary: {}, note: error.message || "Failed to read services" };
+    renderServices(state.services);
   } finally {
     el.refreshServices.disabled = false;
   }
@@ -768,10 +884,10 @@ async function fetchNetwork(force = false) {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     state.networkAttribution = payload;
-    if (state.view === "runtime") renderNetworkAttribution(payload);
+    renderNetworkAttribution(payload);
   } catch (error) {
-    state.networkAttribution = { available: false, throughput_available: false, items: [], summary: {}, note: error.message || "网络归因读取失败" };
-    if (state.view === "runtime") renderNetworkAttribution(state.networkAttribution);
+    state.networkAttribution = { available: false, throughput_available: false, items: [], summary: {}, note: error.message || "Failed to read network attribution" };
+    renderNetworkAttribution(state.networkAttribution);
   } finally {
     el.refreshNetwork.disabled = false;
   }
@@ -784,10 +900,10 @@ async function fetchContainers(force = false) {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     state.containers = payload;
-    if (state.view === "runtime") renderContainers(payload);
+    renderContainers(payload);
   } catch (error) {
-    state.containers = { available: false, installed: false, items: [], summary: {}, note: error.message || "容器清单读取失败" };
-    if (state.view === "runtime") renderContainers(state.containers);
+    state.containers = { available: false, installed: false, items: [], summary: {}, note: error.message || "Failed to read containers" };
+    renderContainers(state.containers);
   } finally {
     el.refreshContainers.disabled = false;
   }
@@ -795,11 +911,32 @@ async function fetchContainers(force = false) {
 
 function eventActionLabel(action) {
   return {
-    opened: "触发",
-    escalated: "升级",
-    deescalated: "降级",
-    resolved: "恢复",
-  }[action] || action || "变化";
+    opened: "Opened",
+    escalated: "Escalated",
+    deescalated: "De-escalated",
+    resolved: "Resolved",
+  }[action] || action || "Changed";
+}
+
+function resourceLabel(resource, fallback = "Resource") {
+  return {
+    cpu: "CPU utilization",
+    memory: "Memory utilization",
+    gpu: "GPU utilization",
+    disk: "Disk utilization",
+    swap: "Swap utilization",
+    disk_latency: "Average disk latency",
+  }[resource] || fallback;
+}
+
+function eventMessage(item) {
+  const label = resourceLabel(item.resource, item.label || "Resource");
+  const value = item.value === null || item.value === undefined ? null : `${Number(item.value).toFixed(1)}${item.unit || ""}`;
+  if (item.action === "resolved" && value === null) return `${label} became unavailable; the alert was closed.`;
+  if (item.action === "resolved") return `${label} recovered to ${value}.`;
+  if (item.action === "deescalated") return `${label} de-escalated from critical to warning at ${value}.`;
+  if (item.action === "escalated") return `${label} escalated to critical at ${value}.`;
+  return `${label} crossed the ${item.current_severity || item.severity || "configured"} threshold at ${value}.`;
 }
 
 function renderAlertBadge(snapshot) {
@@ -816,56 +953,57 @@ function renderEvents(snapshot) {
   const thresholds = model.thresholds || {};
   renderAlertBadge(snapshot);
 
-  el.alertSummary.innerHTML = `<span><b>${formatNumber(summary.active || 0)}</b> 活跃</span><span><b>${formatNumber(summary.critical || 0)}</b> 严重</span><span><b>${formatNumber(summary.warning || 0)}</b> 警告</span>`;
-  el.activeAlerts.innerHTML = active.length ? active.map((item) => `
+  el.alertSummary.innerHTML = `<span><b>${formatNumber(summary.active || 0)}</b> active</span><span><b>${formatNumber(summary.critical || 0)}</b> critical</span><span><b>${formatNumber(summary.warning || 0)}</b> warning</span>`;
+  el.activeAlerts.innerHTML = active.length ? active.slice(0, 2).map((item) => `
     <article class="active-alert is-${escapeHtml(item.severity)}">
       <span class="alert-indicator" aria-hidden="true"></span>
-      <div><strong>${escapeHtml(item.label)}</strong><p>自 ${escapeHtml(formatEventTime(item.since))} 起高于 ${Number(item.threshold || 0).toFixed(0)}${escapeHtml(item.unit)}</p></div>
+      <div><strong>${escapeHtml(resourceLabel(item.resource, item.label))}</strong><p>Above ${Number(item.threshold || 0).toFixed(0)}${escapeHtml(item.unit)} since ${escapeHtml(formatEventTime(item.since))}</p></div>
       <b>${Number(item.value || 0).toFixed(1)}${escapeHtml(item.unit)}</b>
-    </article>`).join("") : `<div class="empty-state">当前没有活跃资源告警</div>`;
+    </article>`).join("") : `<div class="empty-state">No active resource alerts</div>`;
 
   const thresholdSignature = JSON.stringify(thresholds);
   if (state.thresholdRenderSignature !== thresholdSignature) {
     state.thresholdRenderSignature = thresholdSignature;
     el.thresholdGrid.innerHTML = Object.entries(thresholds).map(([resource, rule]) => `
       <article class="threshold-card" data-threshold-resource="${escapeHtml(resource)}">
-        <div class="threshold-card-head"><strong>${escapeHtml(rule.label || resource)}</strong><label class="switch-label"><input data-threshold-enabled type="checkbox" ${rule.enabled ? "checked" : ""}><span>启用</span></label></div>
+        <div class="threshold-card-head"><strong>${escapeHtml(rule.label || resource)}</strong><label class="switch-label"><input data-threshold-enabled type="checkbox" ${rule.enabled ? "checked" : ""}><span>Enabled</span></label></div>
         <div class="threshold-inputs">
-          <label>警告 <span><input data-threshold-warning type="number" min="0" max="99" step="1" value="${Number(rule.warning || 0)}"><i>${escapeHtml(rule.unit || "%")}</i></span></label>
-          <label>严重 <span><input data-threshold-critical type="number" min="1" max="100" step="1" value="${Number(rule.critical || 0)}"><i>${escapeHtml(rule.unit || "%")}</i></span></label>
+          <label>Warning <span><input data-threshold-warning type="number" min="0" max="99" step="1" value="${Number(rule.warning || 0)}"><i>${escapeHtml(rule.unit || "%")}</i></span></label>
+          <label>Critical <span><input data-threshold-critical type="number" min="1" max="100" step="1" value="${Number(rule.critical || 0)}"><i>${escapeHtml(rule.unit || "%")}</i></span></label>
         </div>
-      </article>`).join("") || `<div class="empty-state">没有可配置的阈值</div>`;
+      </article>`).join("") || `<div class="empty-state">No configurable thresholds</div>`;
   }
 
-  el.eventCount.textContent = `${formatNumber(events.length)} 条状态变化`;
-  el.eventTimeline.innerHTML = events.length ? events.map((item) => `
+  el.eventCount.textContent = `${formatNumber(events.length)} total`;
+  el.eventTimeline.innerHTML = events.length ? events.slice(0, 4).map((item) => `
     <article class="timeline-event is-${escapeHtml(item.severity)} ${item.action === "resolved" ? "is-resolved" : ""}">
       <div class="timeline-marker"><span></span></div>
       <div class="timeline-copy">
-        <div><strong>${escapeHtml(item.label)}</strong><span class="event-action">${escapeHtml(eventActionLabel(item.action))}</span><time>${escapeHtml(formatEventTime(item.timestamp))}</time></div>
-        <p>${escapeHtml(item.message)}</p>
+        <div><strong>${escapeHtml(resourceLabel(item.resource, item.label))}</strong><span class="event-action">${escapeHtml(eventActionLabel(item.action))}</span><time>${escapeHtml(formatEventTime(item.timestamp))}</time></div>
+        <p>${escapeHtml(eventMessage(item))}</p>
       </div>
       <span class="timeline-value">${item.value === null || item.value === undefined ? "--" : `${Number(item.value).toFixed(1)}${escapeHtml(item.unit)}`}</span>
-    </article>`).join("") : `<div class="empty-state">尚无阈值状态变化；时间线会在资源越过阈值时出现事件。</div>`;
+    </article>`).join("") : `<div class="empty-state">No threshold transitions yet. Events appear when a resource crosses a configured threshold.</div>`;
   if (state.historyModel) renderPersistentHistory(state.historyModel);
 }
 
 function renderPersistentHistory(model) {
+  if (state.historyRange === "live") return;
   const series = model.series || {};
   const persistence = model.persistence || {};
   const pointCount = Number(model.point_count || 0);
-  el.persistentHistoryChart.classList.remove("skeleton-block");
-  el.persistentHistoryChart.innerHTML = pointCount ? renderChart([
+  el.resourceTrendChart.classList.remove("skeleton-block");
+  el.resourceTrendChart.innerHTML = pointCount ? renderChart([
     { values: series.cpu_percent || [], color: COLORS.cpu },
     { values: series.memory_percent || [], color: COLORS.memory, fill: false },
     { values: series.gpu_percent || [], color: COLORS.gpu, fill: false },
-  ], { height: 66, scaleMax: 100, grid: true }) : `<div class="empty-state compact">当前范围还没有持久采样；数据库每 ${Number(persistence.persist_interval_seconds || 5)} 秒写入一次。</div>`;
+  ], { height: 66, scaleMax: 100, grid: true }) : `<div class="empty-state compact">No persistent samples in this range yet. The database writes every ${Number(persistence.persist_interval_seconds || 5)} seconds.</div>`;
   el.persistenceFacts.innerHTML = persistence.available ? `
-    <span><b>${formatNumber(pointCount)}</b> 图表点</span>
-    <span><b>${formatNumber(persistence.sample_count || 0)}</b> 原始采样</span>
+    <span><b>${formatNumber(pointCount)}</b> chart points</span>
+    <span><b>${formatNumber(persistence.sample_count || 0)}</b> raw samples</span>
     <span><b>${formatBytes(persistence.database_bytes || 0)}</b> SQLite</span>
-    <span><b>${Number(model.resolution_seconds || 0)}s</b> 聚合粒度</span>
-    <span title="${escapeHtml(persistence.path || "")}"><b>${formatNumber(persistence.retention_days || 0)} 天</b> 保留期</span>` : `<span class="is-error">SQLite 不可用：${escapeHtml(persistence.error || "无法创建本地数据库")}</span>`;
+    <span><b>${Number(model.resolution_seconds || 0)}s</b> resolution</span>
+    <span title="${escapeHtml(persistence.path || "")}"><b>${formatNumber(persistence.retention_days || 0)} days</b> retention</span>` : `<span class="is-error">SQLite unavailable: ${escapeHtml(persistence.error || "Could not create the local database")}</span>`;
   document.querySelectorAll("[data-history-range]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.historyRange === state.historyRange);
   });
@@ -877,7 +1015,11 @@ async function fetchHistory(range = "1h") {
   document.querySelectorAll("[data-history-range]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.historyRange === range);
   });
-  el.persistentHistoryChart.classList.add("skeleton-block");
+  if (range === "live") {
+    if (state.snapshot) renderOverview(state.snapshot);
+    return;
+  }
+  el.resourceTrendChart.classList.add("skeleton-block");
   try {
     const response = await fetch(`/api/history?range=${encodeURIComponent(range)}`, { cache: "no-store" });
     const payload = await response.json();
@@ -887,8 +1029,8 @@ async function fetchHistory(range = "1h") {
     renderPersistentHistory(payload);
   } catch (error) {
     if (request !== state.historyRequest) return;
-    el.persistentHistoryChart.classList.remove("skeleton-block");
-    el.persistentHistoryChart.innerHTML = `<div class="empty-state compact">${escapeHtml(error.message || "历史查询失败")}</div>`;
+    el.resourceTrendChart.classList.remove("skeleton-block");
+    el.resourceTrendChart.innerHTML = `<div class="empty-state compact">${escapeHtml(error.message || "History query failed")}</div>`;
   }
 }
 
@@ -898,7 +1040,7 @@ async function saveThresholds() {
     const warning = Number(card.querySelector("[data-threshold-warning]").value);
     const critical = Number(card.querySelector("[data-threshold-critical]").value);
     if (!Number.isFinite(warning) || !Number.isFinite(critical) || warning < 0 || warning >= critical || critical > 100) {
-      showToast(`${card.querySelector("strong").textContent} 的阈值无效`, true);
+      showToast(`Invalid thresholds for ${card.querySelector("strong").textContent}`, true);
       return;
     }
     thresholds[card.dataset.thresholdResource] = {
@@ -919,31 +1061,211 @@ async function saveThresholds() {
     if (state.snapshot?.observability) state.snapshot.observability.thresholds = payload.thresholds;
     state.thresholdRenderSignature = "";
     renderEvents(state.snapshot);
-    showToast("资源阈值已保存");
+    showToast("Resource thresholds saved");
   } catch (error) {
-    showToast(error.message || "阈值保存失败", true);
+    showToast(error.message || "Could not save thresholds", true);
   } finally {
     el.saveThresholds.disabled = false;
   }
 }
 
-function renderAi(snapshot) {
-  const zones = snapshot.zones || [];
-  const ai = snapshot.ai || {};
-  el.aiTotals.innerHTML = `<span><b>${formatNumber(ai.active_session_count || 0)}</b> 活跃会话</span><span><b>${formatBytes(ai.memory_bytes || 0)}</b> 内存</span><span><b>${formatPct(ai.cpu_capacity_percent || 0)}</b> CPU</span>`;
-  el.aiZones.innerHTML = zones.map((zone) => {
-    const sessions = (zone.sessions || []).filter((session) => session.active).slice(0, 8);
-    const color = zone.id === "claude" ? "var(--claude)" : zone.id === "codex" ? "var(--codex)" : "var(--cursor)";
-    return `<article class="zone-card" style="--zone-color:${color}">
-      <div class="zone-head"><div><h3>${escapeHtml(zone.title)}</h3><p>${formatNumber(zone.process_count || 0)} 个相关进程</p></div><span class="zone-total">${formatNumber(zone.session_count || 0)} live</span></div>
-      <div class="zone-metrics"><span>CPU<b>${formatPct(zone.cpu_capacity_percent || 0)}</b></span><span>内存<b>${formatBytes(zone.memory_bytes || 0)}</b></span><span>项目<b>${formatNumber(zone.projects?.length || 0)}</b></span></div>
-      <div class="session-list">${sessions.length ? sessions.map((session) => `
-        <button class="session-row" data-pid="${Number(session.root?.pid || 0)}" type="button">
-          <span class="session-name">${escapeHtml(session.project || session.kind_label)}<small>${escapeHtml(session.kind_label)} · PID ${Number(session.root?.pid || 0)}</small></span>
-          <span class="session-metrics">${formatPct(session.cpu_capacity_percent || 0)}<br>${formatBytes(session.memory_bytes || 0)}</span>
-        </button>`).join("") : `<div class="empty-state compact">当前没有活跃会话</div>`}</div>
-    </article>`;
+function normalizePreferences(value = {}) {
+  const defaults = {
+    density: "compact",
+    hidden_sections: [],
+    show_idle_ai: false,
+    section_order: SECTION_ORDER_DEFAULT,
+    process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
+  };
+  const density = value.density === "comfortable" ? "comfortable" : "compact";
+  const hidden = Array.isArray(value.hidden_sections) ? value.hidden_sections.filter((item) => ["leaders", "processes", "storage", "runtime", "coding"].includes(item)) : [];
+  const columns = Array.isArray(value.process_columns) ? value.process_columns.filter((item) => defaults.process_columns.includes(item)) : defaults.process_columns;
+  const requestedOrder = Array.isArray(value.section_order) ? value.section_order : defaults.section_order;
+  const sectionOrder = [...new Set(requestedOrder.filter((item) => SECTION_ORDER_DEFAULT.includes(item)))];
+  SECTION_ORDER_DEFAULT.forEach((item) => {
+    if (!sectionOrder.includes(item)) sectionOrder.push(item);
+  });
+  return {
+    density,
+    hidden_sections: [...new Set(hidden)],
+    show_idle_ai: Boolean(value.show_idle_ai),
+    section_order: sectionOrder,
+    process_columns: ["identity", ...columns.filter((item) => item !== "identity")],
+  };
+}
+
+function renderSectionOrderControls() {
+  el.sectionOrderList.innerHTML = state.preferences.section_order.map((id, index, order) => {
+    const label = SECTION_LABELS[id] || id;
+    return `<div class="section-order-row">
+      <span class="section-order-index">${String(index + 1).padStart(2, "0")}</span>
+      <span class="section-order-name">${escapeHtml(label)}</span>
+      <span class="section-order-actions">
+        <button class="order-btn" data-section-move="${escapeHtml(id)}" data-move-direction="-1" type="button" aria-label="Move ${escapeHtml(label)} up" ${index === 0 ? "disabled" : ""}>↑</button>
+        <button class="order-btn" data-section-move="${escapeHtml(id)}" data-move-direction="1" type="button" aria-label="Move ${escapeHtml(label)} down" ${index === order.length - 1 ? "disabled" : ""}>↓</button>
+      </span>
+    </div>`;
   }).join("");
+}
+
+function applySectionOrder() {
+  const main = document.getElementById("mainContent");
+  state.preferences.section_order.forEach((id) => {
+    const section = main.querySelector(`[data-dashboard-order="${id}"]`);
+    if (section) main.appendChild(section);
+  });
+  renderSectionOrderControls();
+}
+
+function applyPreferences(preferences, rerender = true) {
+  state.preferences = normalizePreferences(preferences);
+  document.body.dataset.density = state.preferences.density;
+  applySectionOrder();
+  document.querySelectorAll("[data-dashboard-section]").forEach((section) => {
+    section.hidden = state.preferences.hidden_sections.includes(section.dataset.dashboardSection);
+  });
+  document.querySelectorAll("[data-section-toggle]").forEach((input) => {
+    input.checked = !state.preferences.hidden_sections.includes(input.dataset.sectionToggle);
+  });
+  document.querySelectorAll('input[name="dashboardDensity"]').forEach((input) => {
+    input.checked = input.value === state.preferences.density;
+  });
+  document.querySelectorAll("[data-process-column]").forEach((input) => {
+    input.checked = state.preferences.process_columns.includes(input.dataset.processColumn);
+  });
+  el.showIdleAiToggle.checked = state.preferences.show_idle_ai;
+  if (rerender && state.snapshot) {
+    renderProcesses(state.snapshot);
+    renderAi(state.snapshot);
+  }
+}
+
+async function fetchPreferences() {
+  try {
+    const response = await fetch("/api/dashboard-preferences", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    applyPreferences(payload.preferences || {});
+  } catch {
+    applyPreferences(state.preferences, false);
+  }
+}
+
+function schedulePreferenceSave() {
+  clearTimeout(state.preferenceTimer);
+  state.preferenceTimer = window.setTimeout(async () => {
+    try {
+      const response = await fetch("/api/dashboard-preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferences: state.preferences }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      applyPreferences(payload.preferences || state.preferences, false);
+    } catch (error) {
+      showToast(error.message || "Could not save dashboard preferences", true);
+    }
+  }, 180);
+}
+
+function updatePreferencesFromControls() {
+  const hidden = [...document.querySelectorAll("[data-section-toggle]")]
+    .filter((input) => !input.checked)
+    .map((input) => input.dataset.sectionToggle);
+  const columns = ["identity", ...[...document.querySelectorAll("[data-process-column]")]
+    .filter((input) => input.checked)
+    .map((input) => input.dataset.processColumn)];
+  const density = document.querySelector('input[name="dashboardDensity"]:checked')?.value || "compact";
+  applyPreferences({
+    density,
+    hidden_sections: hidden,
+    show_idle_ai: el.showIdleAiToggle.checked,
+    section_order: state.preferences.section_order,
+    process_columns: columns,
+  });
+  schedulePreferenceSave();
+}
+
+function moveDashboardSection(id, direction) {
+  const order = [...state.preferences.section_order];
+  const index = order.indexOf(id);
+  const nextIndex = index + Number(direction || 0);
+  if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return;
+  [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
+  applyPreferences({ ...state.preferences, section_order: order }, false);
+  schedulePreferenceSave();
+}
+
+function renderAiProjects(projects) {
+  const visible = (projects || []).slice(0, 3);
+  if (!visible.length) return "";
+  return `<div class="zone-projects" aria-label="Active projects">${visible.map((project) => {
+    const cpu = Number(project.cpu_capacity_percent || 0);
+    const width = clamp(cpu);
+    return `<div class="zone-project">
+      <div class="zone-project-head">
+        <span title="${escapeHtml(project.name)}">${escapeHtml(project.name)}</span>
+        <small>${formatNumber(project.process_count || 0)}p · ${formatPct(cpu)} · ${formatBytes(project.memory_bytes || 0)}</small>
+      </div>
+      <span class="workload-track" role="progressbar" aria-label="${escapeHtml(project.name)} CPU activity" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width.toFixed(1)}"><span style="--workload-value:${width.toFixed(1)}%"></span></span>
+    </div>`;
+  }).join("")}</div>`;
+}
+
+function renderAiChildren(session) {
+  if (!state.expandedAiSessions.has(session.id)) return "";
+  const children = (session.children || []).slice(0, 10);
+  if (!children.length) return `<div class="ai-child-empty">No child processes</div>`;
+  return `<div class="ai-child-list" aria-label="Child processes">${children.map((child) => `
+    <button class="ai-child-row" data-pid="${Number(child.pid || 0)}" type="button" title="${escapeHtml(child.cmdline || child.name)}">
+      <span class="ai-child-name">${escapeHtml(child.label || child.name)}<small>${statusLabel(child.status)} · PID ${Number(child.pid || 0)} · ${escapeHtml(child.age_label || formatDuration(child.age_seconds || 0))}</small></span>
+      <span class="ai-child-metrics">${formatPct(child.cpu_capacity_percent || 0)}<small>${formatBytes(child.memory_bytes || 0)}</small></span>
+    </button>`).join("")}${(session.children || []).length > children.length ? `<div class="ai-child-overflow">+${(session.children || []).length - children.length} more processes</div>` : ""}</div>`;
+}
+
+function renderAiSession(session) {
+  const cpu = Number(session.cpu_capacity_percent || 0);
+  const width = clamp(cpu);
+  const childCount = (session.children || []).length;
+  const expanded = state.expandedAiSessions.has(session.id);
+  return `<div class="session-group">
+    <div class="session-main">
+      <button class="session-row" data-pid="${Number(session.root?.pid || 0)}" type="button">
+        <span class="session-name">${escapeHtml(session.project || session.kind_label)}<small>${escapeHtml(session.status || "IDLE")} · PID ${Number(session.root?.pid || 0)} · ${formatDuration(session.uptime_seconds || 0)}</small></span>
+        <span class="session-metrics">${formatPct(cpu)} CPU<br>${formatBytes(session.memory_bytes || 0)} RSS</span>
+      </button>
+      ${childCount ? `<button class="session-expand" data-ai-session-toggle="${escapeHtml(session.id)}" type="button" aria-expanded="${expanded}" aria-label="${expanded ? "Hide" : "Show"} ${childCount} child processes" title="${expanded ? "Hide" : "Show"} ${childCount} child processes"><span>${formatNumber(childCount)}</span><span aria-hidden="true">${expanded ? "−" : "+"}</span></button>` : ""}
+    </div>
+    <span class="session-workload workload-track" role="progressbar" aria-label="${escapeHtml(session.project || session.kind_label)} CPU activity" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width.toFixed(1)}"><span style="--workload-value:${width.toFixed(1)}%"></span></span>
+    ${renderAiChildren(session)}
+  </div>`;
+}
+
+function renderAi(snapshot) {
+  const allZones = snapshot.zones || [];
+  const zones = state.preferences.show_idle_ai ? allZones : allZones.filter((zone) => Number(zone.session_count || 0) > 0);
+  const ai = snapshot.ai || {};
+  el.aiTotals.innerHTML = `<span><b>${formatNumber(ai.active_session_count || 0)}</b> active sessions</span><span><b>${formatBytes(ai.memory_bytes || 0)}</b> memory</span><span><b>${formatPct(ai.cpu_capacity_percent || 0)}</b> CPU</span>`;
+  el.aiZones.innerHTML = zones.length ? zones.map((zone) => {
+    const sessions = (zone.sessions || []).filter((session) => state.preferences.show_idle_ai || session.active).slice(0, 6);
+    const color = zone.id === "claude" ? "var(--claude)" : zone.id === "codex" ? "var(--codex)" : "var(--cursor)";
+    const history = (zone.history || []).map((value) => Number(value || 0));
+    const currentCpu = Number(zone.cpu_capacity_percent || 0);
+    const peakCpu = Math.max(currentCpu, 0, ...history);
+    const activityWidth = clamp(currentCpu);
+    return `<article class="zone-card" style="--zone-color:${color}">
+      <div class="zone-head"><div><h3>${escapeHtml(zone.title)}</h3><p>${formatNumber(zone.process_count || 0)} related processes</p></div><span class="zone-total">${formatNumber(zone.session_count || 0)} live</span></div>
+      <div class="zone-metrics"><span>CPU<b>${formatPct(zone.cpu_capacity_percent || 0)}</b></span><span>Memory<b>${formatBytes(zone.memory_bytes || 0)}</b></span><span>Projects<b>${formatNumber(zone.projects?.length || 0)}</b></span></div>
+      <div class="zone-activity">
+        <div class="zone-activity-head"><span>CPU activity</span><span>Now <b>${formatPct(currentCpu)}</b> · Peak <b>${formatPct(peakCpu)}</b></span></div>
+        <span class="zone-workload workload-track" role="progressbar" aria-label="${escapeHtml(zone.title)} CPU activity" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${activityWidth.toFixed(1)}"><span style="--workload-value:${activityWidth.toFixed(1)}%"></span></span>
+        <div class="zone-sparkline" aria-label="${escapeHtml(zone.title)} recent CPU activity">${renderChart([{ values: history, color }], { scaleMax: Math.max(10, peakCpu), height: 28 })}</div>
+      </div>
+      ${renderAiProjects(zone.projects)}
+      <div class="session-list">${sessions.length ? sessions.map(renderAiSession).join("") : `<div class="empty-state compact">No active sessions</div>`}</div>
+    </article>`;
+  }).join("") : `<div class="empty-state compact">No active AI coding sessions. Enable “Show idle providers” to inspect inactive integrations.</div>`;
 }
 
 function renderCurrentView() {
@@ -960,11 +1282,11 @@ function renderAll() {
   if (!state.snapshot) return;
   renderOverview(state.snapshot);
   renderAlertBadge(state.snapshot);
-  if (state.view === "processes") renderProcesses(state.snapshot);
-  if (state.view === "events") renderEvents(state.snapshot);
-  if (state.view === "storage") renderStorage(state.snapshot);
-  if (state.view === "runtime") renderRuntime();
-  if (state.view === "ai") renderAi(state.snapshot);
+  renderProcesses(state.snapshot);
+  renderEvents(state.snapshot);
+  renderStorage(state.snapshot);
+  renderRuntime();
+  renderAi(state.snapshot);
 }
 
 function processSnapshotByPid(pid) {
@@ -978,7 +1300,7 @@ function openProcess(pid) {
   state.selectedDetail = null;
   const fallback = processSnapshotByPid(numericPid);
   el.detailsTitle.textContent = fallback?.label || fallback?.name || `PID ${numericPid}`;
-  el.detailsBody.innerHTML = `<div class="drawer-loading">正在读取 PID ${numericPid} 的详细信息…</div>`;
+  el.detailsBody.innerHTML = `<div class="drawer-loading">Reading details for PID ${numericPid}...</div>`;
   el.detailsDrawer.classList.add("is-open");
   el.detailsDrawer.setAttribute("aria-hidden", "false");
   el.drawerScrim.hidden = false;
@@ -1005,7 +1327,7 @@ async function fetchProcessDetails(pid) {
     renderProcessDetails(payload);
   } catch (error) {
     if (state.selectedPid !== Number(pid)) return;
-    el.detailsBody.innerHTML = `<div class="empty-state">${escapeHtml(error.message || "无法读取进程详情")}</div>`;
+    el.detailsBody.innerHTML = `<div class="empty-state">${escapeHtml(error.message || "Could not read process details")}</div>`;
   }
 }
 
@@ -1019,47 +1341,47 @@ function renderProcessDetails(detail) {
   const ioWrite = sampled.write_bytes_per_s || 0;
   const gpuValue = sampled.gpu_percent !== null && sampled.gpu_percent !== undefined
     ? formatPct(sampled.gpu_percent)
-    : sampled.gpu_memory_bytes ? formatBytes(sampled.gpu_memory_bytes) : "不可归因";
+    : sampled.gpu_memory_bytes ? formatBytes(sampled.gpu_memory_bytes) : "Unavailable";
   el.detailsTitle.textContent = detail.name || `PID ${detail.pid}`;
   const fileList = detail.open_files?.length
     ? detail.open_files.map((path) => `<div class="detail-block"><dd>${escapeHtml(path)}</dd></div>`).join("")
-    : `<div class="empty-state compact">没有可读取的打开文件</div>`;
+    : `<div class="empty-state compact">No readable open files</div>`;
   const connections = Object.entries(detail.connections || {});
-  const connectionText = connections.length ? connections.map(([name, count]) => `${name} ${count}`).join(" · ") : "无或无权限读取";
+  const connectionText = connections.length ? connections.map(([name, count]) => `${name} ${count}`).join(" · ") : "None or access denied";
   const networkModel = detail.network_attribution || {};
   const networkItem = networkModel.item || {};
-  const networkDown = networkModel.throughput_available && networkItem.received_bytes_per_s !== null && networkItem.received_bytes_per_s !== undefined ? formatRate(networkItem.received_bytes_per_s) : "不可用";
-  const networkUp = networkModel.throughput_available && networkItem.sent_bytes_per_s !== null && networkItem.sent_bytes_per_s !== undefined ? formatRate(networkItem.sent_bytes_per_s) : "不可用";
-  const endpointList = networkItem.remote_endpoints?.length ? networkItem.remote_endpoints.map((endpoint) => `<div class="detail-block"><dd>${escapeHtml(endpoint)}</dd></div>`).join("") : `<div class="empty-state compact">${escapeHtml(networkModel.note || "没有可读取的远端端点")}</div>`;
+  const networkDown = networkModel.throughput_available && networkItem.received_bytes_per_s !== null && networkItem.received_bytes_per_s !== undefined ? formatRate(networkItem.received_bytes_per_s) : "Unavailable";
+  const networkUp = networkModel.throughput_available && networkItem.sent_bytes_per_s !== null && networkItem.sent_bytes_per_s !== undefined ? formatRate(networkItem.sent_bytes_per_s) : "Unavailable";
+  const endpointList = networkItem.remote_endpoints?.length ? networkItem.remote_endpoints.map((endpoint) => `<div class="detail-block"><dd>${escapeHtml(endpoint)}</dd></div>`).join("") : `<div class="empty-state compact">${escapeHtml(networkModel.note || "No readable remote endpoints")}</div>`;
   const managementButtons = detail.manageable ? `
-    <button class="action-btn" data-process-action="${detail.status === "stopped" ? "resume" : "suspend"}" type="button">${detail.status === "stopped" ? "恢复进程" : "暂停进程"}</button>
-    <button class="danger-btn" data-confirm-terminate type="button">结束进程</button>
-    <div id="terminateConfirm"></div>` : `<p class="manage-note">${escapeHtml(detail.management_reason || "当前进程不可管理")}</p>`;
+    <button class="action-btn" data-process-action="${detail.status === "stopped" ? "resume" : "suspend"}" type="button">${detail.status === "stopped" ? "Resume process" : "Suspend process"}</button>
+    <button class="danger-btn" data-confirm-terminate type="button">Terminate process</button>
+    <div id="terminateConfirm"></div>` : `<p class="manage-note">${escapeHtml(detail.management_reason || "This process cannot be managed")}</p>`;
   el.detailsBody.innerHTML = `
     <section class="detail-hero">
       <div class="detail-identity"><span class="process-avatar">${escapeHtml(initials(detail.name))}</span><div><h3>${escapeHtml(detail.name || `PID ${detail.pid}`)}</h3><p>${escapeHtml(detail.username || "unknown")} · PID ${Number(detail.pid)} · ${escapeHtml(statusLabel(detail.status))}</p></div></div>
     </section>
     <div class="detail-grid">
-      ${detailField("CPU 整机占比", formatPct(sampled.cpu_capacity_percent ?? (detail.cpu_percent / (state.snapshot?.system?.logical_cpus || 1))))}
-      ${detailField("CPU 累计时间", formatDuration(detail.cpu_time_seconds || 0))}
-      ${detailField("常驻内存", formatBytes(detail.memory_bytes || 0))}
-      ${detailField("虚拟内存", formatBytes(detail.virtual_memory_bytes || 0))}
+      ${detailField("CPU capacity", formatPct(sampled.cpu_capacity_percent ?? (detail.cpu_percent / (state.snapshot?.system?.logical_cpus || 1))))}
+      ${detailField("CPU time", formatDuration(detail.cpu_time_seconds || 0))}
+      ${detailField("Resident memory", formatBytes(detail.memory_bytes || 0))}
+      ${detailField("Virtual memory", formatBytes(detail.virtual_memory_bytes || 0))}
       ${detailField("GPU", gpuValue)}
-      ${detailField("线程", formatNumber(detail.threads || 0))}
-      ${detailField("磁盘读取", `${formatRate(ioRead)} · 共 ${formatBytes(detail.read_bytes || 0)}`)}
-      ${detailField("磁盘写入", `${formatRate(ioWrite)} · 共 ${formatBytes(detail.write_bytes || 0)}`)}
-      ${detailField("运行时间", formatDuration(detail.age_seconds || 0))}
-      ${detailField("父进程", `PID ${detail.ppid || 0}`)}
-      ${detailField("子进程", formatNumber(detail.children?.length || 0))}
-      ${detailField("网络连接", connectionText)}
-      ${detailField("网络下行", networkDown)}
-      ${detailField("网络上行", networkUp)}
+      ${detailField("Threads", formatNumber(detail.threads || 0))}
+      ${detailField("Disk read", `${formatRate(ioRead)} · ${formatBytes(detail.read_bytes || 0)} total`)}
+      ${detailField("Disk write", `${formatRate(ioWrite)} · ${formatBytes(detail.write_bytes || 0)} total`)}
+      ${detailField("Age", formatDuration(detail.age_seconds || 0))}
+      ${detailField("Parent", `PID ${detail.ppid || 0}`)}
+      ${detailField("Children", formatNumber(detail.children?.length || 0))}
+      ${detailField("Network sockets", connectionText)}
+      ${detailField("Download", networkDown)}
+      ${detailField("Upload", networkUp)}
     </div>
-    <section class="detail-section"><h4>工作目录</h4><div class="command-block">${escapeHtml(detail.cwd || "不可读取")}</div><div class="copy-actions"><button class="secondary-btn" data-copy-field="cwd" type="button">复制目录</button></div></section>
-    <section class="detail-section"><h4>命令</h4><pre class="command-block">${escapeHtml(detail.cmdline || "不可读取")}</pre><div class="copy-actions"><button class="secondary-btn" data-copy-field="pid" type="button">复制 PID</button><button class="secondary-btn" data-copy-field="cmdline" type="button">复制命令</button></div></section>
-    <section class="detail-section"><h4>网络归因 · ${escapeHtml(networkModel.provider || "unavailable")}</h4><div class="detail-list">${endpointList}</div></section>
-    <section class="detail-section"><h4>打开的文件</h4><div class="detail-list">${fileList}</div></section>
-    <section class="detail-section"><h4>进程管理</h4><div class="process-actions">${managementButtons}</div></section>`;
+    <section class="detail-section"><h4>Working directory</h4><div class="command-block">${escapeHtml(detail.cwd || "Unavailable")}</div><div class="copy-actions"><button class="secondary-btn" data-copy-field="cwd" type="button">Copy directory</button></div></section>
+    <section class="detail-section"><h4>Command</h4><pre class="command-block">${escapeHtml(detail.cmdline || "Unavailable")}</pre><div class="copy-actions"><button class="secondary-btn" data-copy-field="pid" type="button">Copy PID</button><button class="secondary-btn" data-copy-field="cmdline" type="button">Copy command</button></div></section>
+    <section class="detail-section"><h4>Network attribution · ${escapeHtml(networkModel.provider || "unavailable")}</h4><div class="detail-list">${endpointList}</div></section>
+    <section class="detail-section"><h4>Open files</h4><div class="detail-list">${fileList}</div></section>
+    <section class="detail-section"><h4>Process management</h4><div class="process-actions">${managementButtons}</div></section>`;
 }
 
 function showTerminateConfirmation() {
@@ -1067,7 +1389,7 @@ function showTerminateConfirmation() {
   if (!detail) return;
   const target = document.getElementById("terminateConfirm");
   if (!target) return;
-  target.innerHTML = `<div class="confirm-box"><p>结束 PID ${Number(detail.pid)} 可能导致未保存的数据丢失。此操作只向当前用户拥有的进程发送终止信号。</p><div class="copy-actions"><button class="secondary-btn" data-cancel-terminate type="button">取消</button><button class="danger-btn" data-process-action="terminate" type="button">确认结束 PID ${Number(detail.pid)}</button></div></div>`;
+  target.innerHTML = `<div class="confirm-box"><p>Terminating PID ${Number(detail.pid)} may discard unsaved data. This sends a termination signal only to a process owned by the current user.</p><div class="copy-actions"><button class="secondary-btn" data-cancel-terminate type="button">Cancel</button><button class="danger-btn" data-process-action="terminate" type="button">Terminate PID ${Number(detail.pid)}</button></div></div>`;
 }
 
 async function runProcessAction(action) {
@@ -1081,7 +1403,7 @@ async function runProcessAction(action) {
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-    showToast(action === "terminate" ? `已向 PID ${pid} 发送结束信号` : action === "suspend" ? `已暂停 PID ${pid}` : `已恢复 PID ${pid}`);
+    showToast(action === "terminate" ? `Termination signal sent to PID ${pid}` : action === "suspend" ? `PID ${pid} suspended` : `PID ${pid} resumed`);
     if (action === "terminate") {
       closeProcess();
     } else {
@@ -1089,7 +1411,7 @@ async function runProcessAction(action) {
     }
     fetchSnapshot();
   } catch (error) {
-    showToast(error.message || "进程操作失败", true);
+    showToast(error.message || "Process action failed", true);
   }
 }
 
@@ -1102,9 +1424,9 @@ async function fetchSnapshot() {
       state.snapshot = snapshot;
       renderAll();
     }
-    setConnection(state.paused ? "已暂停" : "实时", state.paused ? "paused" : "live");
+    setConnection(state.paused ? "Paused" : "Live", state.paused ? "paused" : "live");
   } catch {
-    setConnection("离线", "error");
+    setConnection("Offline", "error");
   }
 }
 
@@ -1127,14 +1449,14 @@ function startEvents() {
         state.snapshot = snapshot;
         renderAll();
       }
-      setConnection(state.paused ? "已暂停" : "实时", state.paused ? "paused" : "live");
+      setConnection(state.paused ? "Paused" : "Live", state.paused ? "paused" : "live");
     } catch {
-      setConnection("数据错误", "error");
+      setConnection("Data error", "error");
     }
   });
-  state.eventSource.addEventListener("error", () => setConnection("重连中", "waiting"));
+  state.eventSource.addEventListener("error", () => setConnection("Reconnecting", "waiting"));
   state.eventSource.onerror = () => {
-    setConnection("重连中", "waiting");
+    setConnection("Reconnecting", "waiting");
     if (!state.snapshot) {
       state.eventSource.close();
       startFallbackPolling();
@@ -1143,6 +1465,19 @@ function startEvents() {
 }
 
 document.addEventListener("click", (event) => {
+  const aiSessionToggle = event.target.closest("[data-ai-session-toggle]");
+  if (aiSessionToggle) {
+    const sessionId = aiSessionToggle.dataset.aiSessionToggle;
+    if (state.expandedAiSessions.has(sessionId)) state.expandedAiSessions.delete(sessionId);
+    else state.expandedAiSessions.add(sessionId);
+    renderAi(state.snapshot);
+    return;
+  }
+  const sectionMoveButton = event.target.closest("[data-section-move]");
+  if (sectionMoveButton) {
+    moveDashboardSection(sectionMoveButton.dataset.sectionMove, sectionMoveButton.dataset.moveDirection);
+    return;
+  }
   const navButton = event.target.closest("[data-view]");
   if (navButton) {
     setView(navButton.dataset.view);
@@ -1195,8 +1530,10 @@ document.addEventListener("keydown", (event) => {
 el.pauseBtn.addEventListener("click", () => {
   state.paused = !state.paused;
   el.pauseBtn.classList.toggle("is-paused", state.paused);
-  el.pauseBtn.setAttribute("aria-label", state.paused ? "恢复实时更新" : "暂停实时更新");
-  setConnection(state.paused ? "已暂停" : "实时", state.paused ? "paused" : "live");
+  el.pauseBtn.setAttribute("aria-label", state.paused ? "Resume live updates" : "Pause live updates");
+  const label = el.pauseBtn.querySelector(".pause-label");
+  if (label) label.textContent = state.paused ? "Resume" : "Pause";
+  setConnection(state.paused ? "Paused" : "Live", state.paused ? "paused" : "live");
 });
 
 el.processSearch.addEventListener("input", (event) => {
@@ -1224,6 +1561,24 @@ el.showMoreProcesses.addEventListener("click", () => {
 
 el.saveThresholds.addEventListener("click", saveThresholds);
 
+document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-section-toggle], [data-process-column], input[name='dashboardDensity'], #showIdleAiToggle")) {
+    updatePreferencesFromControls();
+  }
+});
+
+el.resetPreferences.addEventListener("click", () => {
+  applyPreferences({
+    density: "compact",
+    hidden_sections: [],
+    show_idle_ai: false,
+    section_order: [...SECTION_ORDER_DEFAULT],
+    process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
+  });
+  schedulePreferenceSave();
+  showToast("Dashboard preferences reset");
+});
+
 el.serviceSearch.addEventListener("input", (event) => {
   state.serviceQuery = event.target.value.trim();
   if (state.services) renderServices(state.services);
@@ -1240,7 +1595,7 @@ el.detailsBody.addEventListener("click", (event) => {
   const copyButton = event.target.closest("[data-copy-field]");
   if (copyButton && state.selectedDetail) {
     const field = copyButton.dataset.copyField;
-    copyText(state.selectedDetail[field], field === "pid" ? "PID 已复制" : "内容已复制");
+    copyText(state.selectedDetail[field], field === "pid" ? "PID copied" : "Content copied");
     return;
   }
   if (event.target.closest("[data-confirm-terminate]")) {
@@ -1256,4 +1611,16 @@ el.detailsBody.addEventListener("click", (event) => {
   if (actionButton) runProcessAction(actionButton.dataset.processAction);
 });
 
+applyPreferences(state.preferences, false);
+fetchPreferences();
 startEvents();
+fetchHistory(state.historyRange);
+fetchServices();
+fetchNetwork();
+fetchContainers();
+state.runtimeTimer = window.setInterval(() => {
+  if (!state.paused) fetchNetwork(true);
+}, 4000);
+state.containerTimer = window.setInterval(() => {
+  if (!state.paused) fetchContainers(true);
+}, 8000);

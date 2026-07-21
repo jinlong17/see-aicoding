@@ -1,6 +1,6 @@
 # 本地资源看板重构说明
 
-更新日期：2026-07-20
+更新日期：2026-07-21
 
 ## 结论
 
@@ -32,7 +32,7 @@ Web 看板的主模型已经从“AI Agent 会话监控”调整为“系统资�
 2. 压力是否持续，以及磁盘/网络此刻是否繁忙；
 3. 哪些程序对 CPU、内存和 GPU 压力贡献最大。
 
-核心资源继续使用原有暗色卡片风格，但统一为同一种读法：状态、当前值、硬件/容量上下文、短期趋势和占用刻度。
+核心资源继续使用原有暗色卡片风格，但统一为同一种读法：状态、当前值、硬件/容量上下文、短期趋势和占用刻度。CPU、GPU、内存、存储、网络与进程分别使用稳定且不重复的语义颜色；颜色在顶部卡片、趋势、排行榜和明细中保持一致。
 
 ### 2. 程序与进程
 
@@ -54,7 +54,19 @@ launchd/systemd 服务、逐进程网络和 Docker/Podman 容器都采用独立�
 
 ### 6. AI 工作负载
 
-Claude、Codex/OpenAI 和 Cursor 的识别、项目归因与会话聚合全部保留。它们现在位于专项页，和普通系统进程共享采样结果，避免维护两套事实来源。
+Claude、Codex/OpenAI 和 Cursor 的识别、项目归因与会话聚合全部保留。它们现在位于顶部资源卡片之后的可移动专项区块，而不是独立 Tab；和普通系统进程共享采样结果，避免维护两套事实来源。每个工具保留固定身份色，并显示实时 CPU 活动条、短期趋势、项目摘要、会话状态和可展开子进程。
+
+### 7. Compact Dashboard 与偏好设置
+
+Web 看板采用单页渐进披露，不再依赖多个顶层 Tab。CPU、GPU、内存、存储、网络和进程卡片固定在顶部；AI 工作负载、趋势/告警、资源排行榜、进程清单、存储和运行时区块可调整上下顺序。用户可隐藏非必要区块、切换紧凑/舒适密度、控制是否显示空闲 AI provider，并选择进程表字段。
+
+这些偏好通过 `/api/dashboard-preferences` 读写 SQLite settings，刷新页面或重启看板后仍然保留。后端只接受白名单 section/column id，并自动补齐新版本增加的默认区块，避免旧偏好破坏后续布局。
+
+### 8. 颜色系统
+
+颜色不是按组件随机分配，而是按数据域注册：CPU、GPU、内存、存储、网络、进程、磁盘读写、网络上下行、服务、容器和状态各有独立 token；Claude、Codex、Cursor 使用独立且固定的身份色。JavaScript 图表直接引用 CSS token，不维护第二套十六进制常量。
+
+完整 token、组件映射和验收规则见 [Dashboard Design System](./DASHBOARD_DESIGN_SYSTEM.md)。测试 `tests/test_dashboard_palette.py` 会阻止语义 token 使用重复色值。
 
 ## 模块边界
 
@@ -70,7 +82,7 @@ diskutil/smartctl ──> storage.SmartCollector ───────> normaliz
 samples ───────────> observability.ThresholdEngine ─> transition events
 samples/events ────> persistence.HistoryStore ──────> SQLite WAL / range queries
 
-all normalized data ──> snapshot schema v3 ──> cached SSE / JSON ──> six web views
+all normalized data ──> snapshot schema v3 ──> cached SSE / JSON ──> compact web sections
 
 selected PID ──────> on-demand detail endpoint
 confirmed action ──> guarded same-user process action endpoint
@@ -84,8 +96,8 @@ runtime adapters ──> launchd/systemd · nettop/sockets · Docker/Podman endp
 - `observability.py` 只负责阈值状态机；`persistence.py` 负责 SQLite schema、保留策略和历史降采样，两者不依赖浏览器。
 - `runtime.py` 封装服务、网络与容器命令适配器，全部具有超时、缓存和明确降级状态。
 - `snapshot.py` 提供 schema v3，同时保留旧版 `cpu_percent` 和 `disk` 别名，降低现有客户端迁移成本。
-- `web.py` 在刷新窗口内缓存快照，避免每个 SSE 客户端重复进行一次全系统采样；详细进程信息独立按需读取。
-- `web_static` 只消费规范化 JSON，不包含平台判断或系统命令。
+- `web.py` 在刷新窗口内缓存快照，避免每个 SSE 客户端重复进行一次全系统采样；详细进程信息独立按需读取；同时对白名单化 Dashboard 偏好进行规范化，并通过 SQLite settings 持久化区块顺序、可见性、密度和表格字段。
+- `web_static` 只消费规范化 JSON，不包含平台判断或系统命令；资源图表引用统一 CSS 语义色，不重复定义颜色常量。
 
 ## GPU 可用性约定
 
@@ -100,7 +112,7 @@ runtime adapters ──> launchd/systemd · nettop/sockets · Docker/Podman endp
 
 ## 已完成与下一阶段建议
 
-本轮已经完成阈值与事件、SQLite 历史、进程树与服务、SMART/IOPS/延迟、逐进程网络归因和容器视图。后续仍建议按价值和架构依赖排序：
+本轮已经完成阈值与事件、SQLite 历史、进程树与服务、SMART/IOPS/延迟、逐进程网络归因、容器视图、Compact Dashboard、持久偏好、区块排序、动态卡片，以及全局唯一语义色系统。后续仍建议按价值和架构依赖排序：
 
 1. **异常关联**：基于 SQLite 历史识别“哪个进程启动后同时引发 CPU、磁盘和网络突增”，先用规则和 z-score，不急于引入重型 ML。
 2. **历史导出与容量预测**：增加 CSV/JSON 导出、数据库大小上限和磁盘空间增长预测。

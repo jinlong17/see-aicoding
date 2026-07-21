@@ -14,6 +14,9 @@ Track CPU, GPU, memory, disks, I/O, network, programs, processes, and AI coding 
 
 </div>
 
+Current release: `0.4.0`. See [CHANGELOG.md](./CHANGELOG.md) for the compact
+dashboard, semantic color system, and AI workload restoration notes.
+
 ## Preview
 
 ```text
@@ -57,9 +60,9 @@ When a machine feels slow, the responsible workload is often hidden behind helpe
 | Which current-user apps or process groups are hottest? | Bottom resource watch: Memory Top5 and CPU capacity Top5 |
 | Is pressure coming from CPU, GPU, memory, or storage? | Web overview resource cards and live history |
 | Which programs and individual PIDs are responsible? | Web Programs / Processes inventory |
-| How much disk space remains on each local volume? | Web Storage view |
-| Did a resource cross a limit, and when did it recover? | Web Events timeline and SQLite history |
-| Which service, process, or container owns the activity? | Process tree and Web Runtime view |
+| How much disk space remains on each local volume? | Web Storage section |
+| Did a resource cross a limit, and when did it recover? | Web event timeline and SQLite history |
+| Which service, process, or container owns the activity? | Process tree and Web Runtime section |
 | Which process is sending or receiving data? | Runtime per-process network attribution |
 
 ## Features
@@ -82,6 +85,8 @@ When a machine feels slow, the responsible workload is often hidden behind helpe
 | Network attribution | macOS per-process byte rates via nettop; connection and endpoint fallback where byte counters are unavailable |
 | Container runtime | Docker/Podman inventory and one-shot CPU, memory, network, block I/O, port, and PID metrics |
 | Guarded process actions | Suspend, resume, or terminate current-user processes with protected PID and same-origin checks |
+| Compact Dashboard | Dense single-page Web layout with movable sections, optional cards, configurable process columns, and SQLite-backed preferences |
+| Stable semantic colors | Dedicated colors for resources, I/O directions, runtime domains, alert states, and each AI provider |
 
 ## Install
 
@@ -112,7 +117,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 python3 -m pip install -e .
-see-aicoding
+see-aicoding --web --open
 ```
 
 If the command is not found after a `pip --user` install, add your Python user-base bin directory to `PATH`:
@@ -133,13 +138,16 @@ Homebrew-style wrapper at `/opt/homebrew/bin/see-aicoding` launches
 ## Usage
 
 ```bash
-see-aicoding                  # live dashboard, 1.5s refresh
-see-aicoding -i 0.5           # faster refresh
+see-aicoding --web --open     # compact Web dashboard at 127.0.0.1:8765
+see-aicoding --web            # Web dashboard without opening a browser
+see-aicoding --web -i 0.5     # Web dashboard with faster sampling
+see-aicoding                  # focused terminal AI dashboard, 1.5s refresh
+see-aicoding -i 0.5           # faster terminal refresh
 see-aicoding --all            # include idle sessions
 see-aicoding --no-tree        # one row per session
 see-aicoding --once           # print one snapshot and exit
 see-aicoding --full-screen    # alternate-screen mode
-see-aicoding --web --open     # local web monitor at 127.0.0.1:8765
+see-aicoding --version        # print the installed version
 ```
 
 | Flag | Default | Effect |
@@ -162,18 +170,26 @@ see-aicoding --web --open
 ```
 
 The Web monitor serves a local-only system resource center at
-`http://127.0.0.1:8765/`. Its six views cover system overview, grouped programs
-and PID trees, thresholds and persistent history, local storage health, system
-services/network/container runtime, and the preserved AI workload model.
+`http://127.0.0.1:8765/`. Its compact single-page layout keeps resource cards at
+the top and presents AI workloads, trends and alerts, resource leaders, process
+inventory, storage health, and runtime data as movable sections instead of
+large top-level tabs. Customize controls persist density, section visibility,
+section order, idle-provider visibility, and process columns in SQLite.
 Apple Silicon, NVIDIA, Linux DRM, SMART, launchd/systemd, nettop, Docker, and
 Podman providers are detected at runtime and expose explicit unavailable states.
 Process details are loaded on demand; current-user suspend, resume, and
 terminate actions are protected by same-origin checks, PID guards, and an
 in-product confirmation step.
 
+The color system is intentionally semantic: CPU, GPU, memory, storage, network,
+processes, disk I/O, services, containers, and alert states each have a
+dedicated token. Claude, Codex, and Cursor keep stable identity colors across
+their cards, trends, projects, sessions, and child-process rows.
+
 See [the resource dashboard architecture](https://github.com/jinlong17/see-aicoding/blob/main/docs/RESOURCE_DASHBOARD_ARCHITECTURE.md)
 for the research basis, module boundaries, GPU availability contract, and
-recommended next phases.
+recommended next phases. See [the dashboard design system](https://github.com/jinlong17/see-aicoding/blob/main/docs/DASHBOARD_DESIGN_SYSTEM.md)
+for the palette registry, component color rules, density contract, and visual QA checklist.
 
 ## Troubleshooting
 
@@ -184,15 +200,19 @@ which see-aicoding
 see-aicoding --version
 ```
 
-Check whether the loaded package includes the current Resource watch features:
+Check whether the loaded package is the expected release and exposes the Web command:
 
 ```bash
-python3 - <<'PY'
-import see_aicoding.render as render
-print(render.__file__)
-print(hasattr(render, "ResourceGroup"))
-print(hasattr(render, "chrome_tab_stats"))
-PY
+see-aicoding --version
+see-aicoding --help
+python3 -c "import see_aicoding; print(see_aicoding.__version__, see_aicoding.__file__)"
+```
+
+With the Web monitor running, verify the live API and saved dashboard preferences:
+
+```bash
+curl --fail --silent http://127.0.0.1:8765/api/snapshot | python3 -m json.tool | head -40
+curl --fail --silent http://127.0.0.1:8765/api/dashboard-preferences | python3 -m json.tool
 ```
 
 If `which see-aicoding` points to a wrapper script, inspect the first few lines
@@ -257,7 +277,7 @@ src/see_aicoding/
 ├── storage.py         # diskutil/smartctl health adapters
 ├── runtime.py         # services, per-process network, Docker/Podman adapters
 ├── web.py             # local ThreadingHTTPServer + SSE endpoints
-├── web_static/        # browser UI assets
+├── web_static/        # compact browser UI, semantic color tokens, and interactions
 ├── cursor_ext.py      # Cursor / VS Code AI extension scanner
 ├── __main__.py        # python -m see_aicoding
 └── __init__.py

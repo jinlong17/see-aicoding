@@ -1,437 +1,198 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta name="description" content="see-aicoding 本地系统资源监控与进程管理看板">
-  <title>see-aicoding · 本地资源中心</title>
+  <meta name="description" content="Compact local system monitoring for CPU, GPU, memory, storage, processes, services, network activity, containers, and AI coding workloads.">
+  <title>see-aicoding · System monitor</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body>
-  <a class="skip-link" href="#mainContent">跳到主要内容</a>
+<body data-density="compact">
+  <a class="skip-link" href="#mainContent">Skip to dashboard</a>
 
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-mark" aria-hidden="true">sa</span>
         <div class="brand-copy">
           <h1>see-aicoding</h1>
-          <p>Local resource center</p>
+          <p id="hostLine">Local system monitor</p>
         </div>
       </div>
 
-      <nav class="primary-nav" aria-label="主要页面">
-        <button class="nav-btn is-active" data-view="overview" type="button">总览</button>
-        <button class="nav-btn" data-view="processes" type="button">程序与进程</button>
-        <button class="nav-btn nav-with-badge" data-view="events" type="button">事件<span id="alertBadge" class="nav-badge" hidden>0</span></button>
-        <button class="nav-btn" data-view="storage" type="button">存储</button>
-        <button class="nav-btn" data-view="runtime" type="button">运行时</button>
-        <button class="nav-btn" data-view="ai" type="button">AI 工作负载</button>
-      </nav>
-
-      <div class="live-controls">
-        <div id="connectionState" class="connection is-waiting" role="status">
-          <span class="connection-dot" aria-hidden="true"></span>
-          <span>连接中</span>
+      <div class="toolbar" aria-label="Monitor controls">
+        <div class="host-facts" aria-label="System summary">
+          <span><b id="factUptime">--</b><small>uptime</small></span>
+          <span><b id="factProcesses">--</b><small>processes</small></span>
+          <span><b id="factLoad">--</b><small>load</small></span>
         </div>
-        <button id="pauseBtn" class="icon-action" type="button" aria-label="暂停实时更新" title="暂停实时更新">
-          <span class="pause-icon" aria-hidden="true"></span>
+        <div id="connectionState" class="connection is-waiting" role="status">
+          <span class="connection-dot" aria-hidden="true"></span><span>Connecting</span>
+        </div>
+        <button id="pauseBtn" class="tool-btn" type="button" aria-label="Pause live updates">
+          <span class="pause-icon" aria-hidden="true"></span><span class="pause-label">Pause</span>
         </button>
+        <details id="customizeMenu" class="customize-menu">
+          <summary class="tool-btn">Customize</summary>
+          <div class="customize-popover">
+            <div class="customize-head"><strong>Dashboard</strong><button id="resetPreferences" class="text-btn" type="button">Reset</button></div>
+            <fieldset>
+              <legend>Density</legend>
+              <label><input type="radio" name="dashboardDensity" value="compact" checked> Compact</label>
+              <label><input type="radio" name="dashboardDensity" value="comfortable"> Comfortable</label>
+            </fieldset>
+            <fieldset>
+              <legend>Visible sections</legend>
+              <label><input type="checkbox" data-section-toggle="leaders" checked> Top resource users</label>
+              <label><input type="checkbox" data-section-toggle="processes" checked> Programs and processes</label>
+              <label><input type="checkbox" data-section-toggle="storage" checked> Storage</label>
+              <label><input type="checkbox" data-section-toggle="runtime" checked> Runtime</label>
+              <label><input type="checkbox" data-section-toggle="coding" checked> Coding sessions</label>
+            </fieldset>
+            <fieldset>
+              <legend>Section order</legend>
+              <p class="customize-note">CPU, GPU, and the other resource cards stay pinned at the top.</p>
+              <div id="sectionOrderList" class="section-order-list"></div>
+            </fieldset>
+            <fieldset>
+              <legend>Process columns</legend>
+              <div class="column-options">
+                <label><input type="checkbox" data-process-column="pid" checked> PID / PPID</label>
+                <label><input type="checkbox" data-process-column="user" checked> User</label>
+                <label><input type="checkbox" data-process-column="state" checked> State</label>
+                <label><input type="checkbox" data-process-column="cpu" checked> CPU</label>
+                <label><input type="checkbox" data-process-column="memory" checked> Memory</label>
+                <label><input type="checkbox" data-process-column="gpu" checked> GPU</label>
+                <label><input type="checkbox" data-process-column="disk" checked> Disk R/W</label>
+                <label><input type="checkbox" data-process-column="network" checked> Network</label>
+                <label><input type="checkbox" data-process-column="threads" checked> Threads</label>
+                <label><input type="checkbox" data-process-column="age" checked> Age</label>
+              </div>
+            </fieldset>
+          </div>
+        </details>
       </div>
     </header>
 
     <main id="mainContent">
-      <section id="view-overview" class="view is-active" data-view-panel="overview" aria-labelledby="overviewTitle">
-        <div class="overview-intro">
-          <div>
-            <div id="hostLine" class="eyebrow">LOCAL SYSTEM · 正在读取</div>
-            <h2 id="overviewTitle">资源状态，一眼看清。</h2>
-            <p>从硬件压力到具体进程，所有数据都来自当前设备。</p>
-          </div>
-          <div class="system-facts" aria-label="系统摘要">
-            <span><b id="factUptime">--</b><small>运行时间</small></span>
-            <span><b id="factProcesses">--</b><small>进程</small></span>
-            <span><b id="factLoad">--</b><small>1 分钟负载</small></span>
-          </div>
-        </div>
+      <section class="metric-grid" aria-label="System overview">
+        <article class="metric-card metric-cpu">
+          <div class="metric-head"><span class="metric-label">CPU</span><span id="cpuState" class="metric-state">Reading</span></div>
+          <div class="metric-body"><div><div class="metric-reading"><strong id="cpuValue">--</strong><span>%</span></div><p id="cpuDetail">Waiting for processor data</p></div><div id="cpuChart" class="metric-gauge" aria-label="CPU utilization"><span>--</span></div></div>
+          <div class="meter" aria-hidden="true"><span id="cpuMeter"></span></div>
+        </article>
+        <article id="gpuMetricCard" class="metric-card metric-gpu" data-auto-card="gpu">
+          <div class="metric-head"><span class="metric-label">GPU</span><span id="gpuState" class="metric-state">Detecting</span></div>
+          <div class="metric-body"><div><div class="metric-reading"><strong id="gpuValue">--</strong><span>%</span></div><p id="gpuDetail">Waiting for GPU telemetry</p></div><div id="gpuChart" class="metric-gauge" aria-label="GPU utilization"><span>--</span></div></div>
+          <div class="meter" aria-hidden="true"><span id="gpuMeter"></span></div>
+        </article>
+        <article class="metric-card metric-memory">
+          <div class="metric-head"><span class="metric-label">Memory</span><span id="memoryState" class="metric-state">Reading</span></div>
+          <div class="metric-body"><div><div class="metric-reading"><strong id="memoryValue">--</strong><span>%</span></div><p id="memoryDetail">Waiting for memory data</p></div><div id="memoryChart" class="metric-gauge" aria-label="Memory utilization"><span>--</span></div></div>
+          <div class="meter" aria-hidden="true"><span id="memoryMeter"></span></div>
+        </article>
+        <article class="metric-card metric-storage">
+          <div class="metric-head"><span class="metric-label">Storage</span><span id="storageState" class="metric-state">Reading</span></div>
+          <div class="metric-body"><div><div class="metric-reading"><strong id="storageValue">--</strong><span>%</span></div><p id="storageDetail">Waiting for local volumes</p></div><div id="storageChart" class="metric-gauge" aria-label="Storage utilization"><span>--</span></div></div>
+          <div class="meter" aria-hidden="true"><span id="storageMeter"></span></div>
+        </article>
+        <article class="metric-card metric-network">
+          <div class="metric-head"><span class="metric-label">Network</span><span class="metric-state is-good">Live</span></div>
+          <div class="metric-body"><div><div class="metric-reading metric-rate"><strong id="networkValue">--</strong></div><p id="networkDetail">Waiting for interface activity</p></div><div id="networkChart" class="metric-gauge" aria-label="Network activity"><span>--</span></div></div>
+          <div class="meter" aria-hidden="true"><span id="networkMeter"></span></div>
+        </article>
+        <article class="metric-card metric-processes">
+          <div class="metric-head"><span class="metric-label">Processes</span><span class="metric-state is-good">Local</span></div>
+          <div class="metric-body"><div><div class="metric-reading metric-count"><strong id="processValue">--</strong></div><p id="processDetail">Waiting for process inventory</p></div><div id="processChart" class="metric-gauge" aria-label="Running processes"><span>--</span></div></div>
+          <div class="meter" aria-hidden="true"><span id="processMeter"></span></div>
+        </article>
+      </section>
 
-        <section class="metric-grid" aria-label="核心资源">
-          <article class="metric-card metric-cpu">
-            <div class="metric-head">
-              <span class="metric-index">01</span>
-              <span class="metric-label">CPU</span>
-              <span id="cpuState" class="metric-state">读取中</span>
-            </div>
-            <div class="metric-reading">
-              <strong id="cpuValue">--</strong><span>%</span>
-            </div>
-            <p id="cpuDetail">等待处理器信息</p>
-            <div id="cpuChart" class="mini-chart" aria-label="CPU 使用率历史"></div>
-            <div class="meter" aria-hidden="true"><span id="cpuMeter"></span></div>
-          </article>
-
-          <article class="metric-card metric-gpu">
-            <div class="metric-head">
-              <span class="metric-index">02</span>
-              <span class="metric-label">GPU</span>
-              <span id="gpuState" class="metric-state">检测中</span>
-            </div>
-            <div class="metric-reading">
-              <strong id="gpuValue">--</strong><span>%</span>
-            </div>
-            <p id="gpuDetail">等待图形处理器信息</p>
-            <div id="gpuChart" class="mini-chart" aria-label="GPU 使用率历史"></div>
-            <div class="meter" aria-hidden="true"><span id="gpuMeter"></span></div>
-          </article>
-
-          <article class="metric-card metric-memory">
-            <div class="metric-head">
-              <span class="metric-index">03</span>
-              <span class="metric-label">内存</span>
-              <span id="memoryState" class="metric-state">读取中</span>
-            </div>
-            <div class="metric-reading">
-              <strong id="memoryValue">--</strong><span>%</span>
-            </div>
-            <p id="memoryDetail">等待内存信息</p>
-            <div id="memoryChart" class="mini-chart" aria-label="内存使用率历史"></div>
-            <div class="meter" aria-hidden="true"><span id="memoryMeter"></span></div>
-          </article>
-
-          <article class="metric-card metric-storage">
-            <div class="metric-head">
-              <span class="metric-index">04</span>
-              <span class="metric-label">本地磁盘</span>
-              <span id="storageState" class="metric-state">读取中</span>
-            </div>
-            <div class="metric-reading">
-              <strong id="storageValue">--</strong><span>%</span>
-            </div>
-            <p id="storageDetail">等待存储信息</p>
-            <div id="storageChart" class="mini-chart dual" aria-label="磁盘读写历史"></div>
-            <div class="meter" aria-hidden="true"><span id="storageMeter"></span></div>
-          </article>
-        </section>
-
-        <section class="activity-layout" aria-label="实时活动">
-          <article class="panel activity-panel">
-            <div class="panel-head">
-              <div>
-                <span class="section-kicker">60 个采样点</span>
-                <h3>系统活动</h3>
-              </div>
-              <div class="chart-legend" aria-label="图例">
-                <span class="legend-cpu">CPU</span>
-                <span class="legend-memory">内存</span>
-                <span class="legend-gpu">GPU</span>
+      <section class="dashboard-block dashboard-overview-block" data-dashboard-order="overview">
+      <div class="overview-grid" aria-label="Resource trend and system status">
+        <article class="panel trend-panel">
+          <div class="panel-head">
+            <div><span class="section-kicker">Resource trend</span><h2>System activity</h2></div>
+            <div class="trend-controls">
+              <div class="chart-legend" aria-label="Chart legend"><span class="legend-cpu">CPU</span><span class="legend-memory">Memory</span><span id="gpuLegend" class="legend-gpu">GPU</span></div>
+              <div class="segmented compact" role="group" aria-label="Trend range">
+                <button class="is-active" data-history-range="live" type="button">Live</button><button data-history-range="1h" type="button">1h</button><button data-history-range="6h" type="button">6h</button><button data-history-range="24h" type="button">24h</button><button data-history-range="7d" type="button">7d</button>
               </div>
             </div>
-            <div id="systemChart" class="system-chart skeleton-block" aria-label="系统资源历史图"></div>
-            <div class="activity-foot">
-              <span>读 <b id="diskReadRate">--</b></span>
-              <span>写 <b id="diskWriteRate">--</b></span>
-              <span>下行 <b id="networkDownRate">--</b></span>
-              <span>上行 <b id="networkUpRate">--</b></span>
-            </div>
-          </article>
-
-          <aside class="panel pulse-panel" aria-label="系统脉冲">
-            <div class="panel-head">
-              <div>
-                <span class="section-kicker">NOW</span>
-                <h3>系统脉冲</h3>
-              </div>
-              <span id="updateTime" class="updated-time">--:--:--</span>
-            </div>
-            <dl class="pulse-list">
-              <div><dt>运行中</dt><dd id="runningProcesses">--</dd></div>
-              <div><dt>线程总数</dt><dd id="threadCount">--</dd></div>
-              <div><dt>交换空间</dt><dd id="swapUsage">--</dd></div>
-              <div><dt>逻辑核心</dt><dd id="logicalCpus">--</dd></div>
-              <div><dt>GPU 提供器</dt><dd id="gpuProvider">--</dd></div>
-            </dl>
-            <button class="text-link" data-view-target="processes" type="button">打开完整进程视图 <span aria-hidden="true">→</span></button>
-          </aside>
-        </section>
-
-        <section class="leader-section" aria-labelledby="pressureTitle">
-          <div class="section-heading">
-            <div>
-              <span class="section-kicker">PRESSURE MAP</span>
-              <h3 id="pressureTitle">高占用程序</h3>
-            </div>
-            <p>按程序聚合辅助进程，点击任意条目查看主进程详情。</p>
           </div>
-          <div class="leader-grid">
-            <article class="leader-card">
-              <div class="leader-title"><span class="resource-glyph">C</span><div><h4>CPU</h4><p>整机容量占比</p></div></div>
-              <div id="topCpu" class="leader-list"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
-            </article>
-            <article class="leader-card">
-              <div class="leader-title"><span class="resource-glyph">M</span><div><h4>内存</h4><p>常驻内存总量</p></div></div>
-              <div id="topMemory" class="leader-list"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
-            </article>
-            <article class="leader-card">
-              <div class="leader-title"><span class="resource-glyph">G</span><div><h4>GPU</h4><p>进程归因视提供器而定</p></div></div>
-              <div id="topGpu" class="leader-list"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
-            </article>
-          </div>
-        </section>
-      </section>
-
-      <section id="view-processes" class="view" data-view-panel="processes" aria-labelledby="processesTitle" hidden>
-        <div class="page-heading">
-          <div>
-            <span class="section-kicker">LIVE INVENTORY</span>
-            <h2 id="processesTitle">程序与进程</h2>
-            <p id="processSummary">正在读取系统进程…</p>
-          </div>
-          <div class="view-stats">
-            <span><b id="processTotal">--</b> 已采集</span>
-            <span><b id="processRunning">--</b> 运行中</span>
-          </div>
-        </div>
-
-        <div class="process-toolbar">
-          <div class="segmented" role="group" aria-label="列表模式">
-            <button class="is-active" data-process-mode="programs" type="button">程序</button>
-            <button data-process-mode="processes" type="button">进程</button>
-            <button data-process-mode="tree" type="button">进程树</button>
-          </div>
-          <label class="search-field">
-            <span aria-hidden="true">⌕</span>
-            <span class="sr-only">搜索程序或进程</span>
-            <input id="processSearch" type="search" placeholder="搜索名称、PID、用户或命令">
-          </label>
-          <label class="select-field">
-            <span class="sr-only">进程范围</span>
-            <select id="processScope">
-              <option value="all">所有用户</option>
-              <option value="mine">当前用户</option>
-            </select>
-          </label>
-          <label class="select-field process-only">
-            <span class="sr-only">进程状态</span>
-            <select id="processStatus">
-              <option value="all">全部状态</option>
-              <option value="running">运行中</option>
-              <option value="sleeping">睡眠</option>
-              <option value="stopped">已暂停</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="process-table-shell panel">
-          <div class="table-scroll">
-            <table class="process-table">
-              <thead id="processTableHead"></thead>
-              <tbody id="processTableBody">
-                <tr><td><div class="table-loading">正在建立系统进程清单…</div></td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="table-footer">
-            <span id="visibleProcessCount">--</span>
-            <button id="showMoreProcesses" class="secondary-btn" type="button" hidden>显示更多</button>
-          </div>
-        </div>
-      </section>
-
-      <section id="view-events" class="view" data-view-panel="events" aria-labelledby="eventsTitle" hidden>
-        <div class="page-heading">
-          <div>
-            <span class="section-kicker">RESOURCE EVENTS</span>
-            <h2 id="eventsTitle">阈值与事件时间线</h2>
-            <p>只记录状态变化，避免高频采样产生重复告警。</p>
-          </div>
-          <div id="alertSummary" class="view-stats">
-            <span><b>--</b> 活跃</span>
-            <span><b>--</b> 严重</span>
-          </div>
-        </div>
-
-        <div id="activeAlerts" class="alert-strip">
-          <div class="empty-state">当前没有活跃资源告警</div>
-        </div>
-
-        <article class="panel persistent-history-panel">
-          <div class="panel-head history-panel-head">
-            <div><span class="section-kicker">SQLITE HISTORY</span><h3>持久资源趋势</h3></div>
-            <div class="segmented compact" role="group" aria-label="历史范围">
-              <button data-history-range="15m" type="button">15 分</button>
-              <button class="is-active" data-history-range="1h" type="button">1 小时</button>
-              <button data-history-range="6h" type="button">6 小时</button>
-              <button data-history-range="24h" type="button">24 小时</button>
-              <button data-history-range="7d" type="button">7 天</button>
-            </div>
-          </div>
-          <div class="chart-legend history-legend" aria-label="图例">
-            <span class="legend-cpu">CPU</span><span class="legend-memory">内存</span><span class="legend-gpu">GPU</span>
-          </div>
-          <div id="persistentHistoryChart" class="system-chart history-chart skeleton-block" aria-label="持久资源历史图"></div>
-          <div id="persistenceFacts" class="history-facts"><span>正在连接本地历史数据库…</span></div>
+          <div id="resourceTrendChart" class="system-chart skeleton-block" aria-label="System resource history"></div>
+          <div class="activity-foot"><span class="activity-disk-read">Disk read<b id="diskReadRate">--</b></span><span class="activity-disk-write">Disk write<b id="diskWriteRate">--</b></span><span class="activity-network-down">Download<b id="networkDownRate">--</b></span><span class="activity-network-up">Upload<b id="networkUpRate">--</b></span></div>
+          <div id="persistenceFacts" class="history-facts"><span>Building live history...</span></div>
         </article>
 
-        <section class="events-layout">
-          <article class="panel threshold-panel">
-            <div class="panel-head">
-              <div><span class="section-kicker">POLICY</span><h3>资源阈值</h3></div>
-              <button id="saveThresholds" class="secondary-btn" type="button">保存阈值</button>
-            </div>
-            <p class="panel-note">警告值必须低于严重值；恢复时使用滞回区间减少抖动。</p>
-            <div id="thresholdGrid" class="threshold-grid"><div class="skeleton-card"></div></div>
-          </article>
+        <aside class="panel status-panel" aria-label="Alerts and recent events">
+          <div class="panel-head"><div><span class="section-kicker">System status</span><h2>Alerts and events</h2></div><span id="updateTime" class="updated-time">--:--:--</span></div>
+          <div id="alertSummary" class="view-stats"><span><b>--</b> active</span><span><b>--</b> critical</span></div>
+          <div id="activeAlerts" class="alert-strip"><div class="empty-state compact">No active resource alerts</div></div>
+          <div class="timeline-head"><strong>Recent transitions</strong><span id="eventCount">--</span></div>
+          <div id="eventTimeline" class="event-timeline"><div class="empty-state compact">Waiting for a resource state change</div></div>
+        </aside>
+      </div>
 
-          <article class="panel timeline-panel">
-            <div class="panel-head">
-              <div><span class="section-kicker">TRANSITIONS</span><h3>事件时间线</h3></div>
-              <span id="eventCount" class="updated-time">--</span>
-            </div>
-            <div id="eventTimeline" class="event-timeline">
-              <div class="empty-state">等待资源状态变化</div>
-            </div>
-          </article>
-        </section>
+      <details class="panel threshold-panel policy-details">
+        <summary><span><span class="section-kicker">Policy</span><strong>Alert thresholds</strong></span><span>Edit thresholds</span></summary>
+        <div class="policy-content"><div class="panel-head"><p class="panel-note">Warning must remain below critical. Recovery uses a hysteresis band to reduce flapping.</p><button id="saveThresholds" class="secondary-btn" type="button">Save thresholds</button></div><div id="thresholdGrid" class="threshold-grid"><div class="skeleton-card"></div></div></div>
+      </details>
+      <span id="alertBadge" hidden>0</span>
       </section>
 
-      <section id="view-storage" class="view" data-view-panel="storage" aria-labelledby="storageTitle" hidden>
-        <div class="page-heading">
-          <div>
-            <span class="section-kicker">LOCAL STORAGE</span>
-            <h2 id="storageTitle">存储与 I/O</h2>
-            <p>容量、剩余空间和整机读写吞吐放在同一视图。</p>
-          </div>
-          <div class="io-summary">
-            <span>读取 <b id="storageReadRate">--</b></span>
-            <span>写入 <b id="storageWriteRate">--</b></span>
-            <span>IOPS <b id="storageIops">--</b></span>
-            <span>延迟 <b id="storageLatency">--</b></span>
-          </div>
+      <section class="dashboard-section" data-dashboard-section="leaders" data-dashboard-order="leaders" aria-labelledby="pressureTitle">
+        <div class="section-heading"><div><span class="section-kicker">Pressure map</span><h2 id="pressureTitle">Top resource users</h2></div><p>Grouped applications; select a row to inspect the primary process.</p></div>
+        <div class="leader-grid">
+          <article class="leader-card leader-cpu"><div class="leader-title"><span class="resource-glyph">C</span><div><h3>CPU</h3><p>Machine capacity</p></div></div><div id="topCpu" class="leader-list"><div class="skeleton-row"></div></div></article>
+          <article class="leader-card leader-memory"><div class="leader-title"><span class="resource-glyph">M</span><div><h3>Memory</h3><p>Resident memory</p></div></div><div id="topMemory" class="leader-list"><div class="skeleton-row"></div></div></article>
+          <article id="thirdLeaderCard" class="leader-card leader-gpu"><div class="leader-title"><span id="thirdLeaderGlyph" class="resource-glyph">G</span><div><h3 id="thirdLeaderTitle">GPU</h3><p id="thirdLeaderNote">Attributed utilization</p></div></div><div id="topGpu" class="leader-list"><div class="skeleton-row"></div></div></article>
         </div>
-        <div id="diskGrid" class="disk-grid">
-          <div class="disk-card skeleton-card"></div>
-          <div class="disk-card skeleton-card"></div>
-        </div>
-        <section class="storage-device-layout">
-          <article class="panel device-health-panel">
-            <div class="panel-head"><div><span id="smartProvider" class="section-kicker">SMART</span><h3>设备健康</h3></div></div>
-            <div id="smartDeviceList" class="device-list"><div class="empty-state compact">正在读取设备健康状态…</div></div>
-          </article>
-          <article class="panel device-io-panel">
-            <div class="panel-head"><div><span class="section-kicker">DEVICE I/O</span><h3>IOPS 与平均延迟</h3></div></div>
-            <div id="deviceIoList" class="device-list"><div class="empty-state compact">等待磁盘活动采样…</div></div>
-          </article>
-        </section>
-        <section class="storage-lower">
-          <article class="panel storage-chart-panel">
-            <div class="panel-head">
-              <div><span class="section-kicker">THROUGHPUT</span><h3>磁盘吞吐历史</h3></div>
-              <div class="chart-legend"><span class="legend-read">读取</span><span class="legend-write">写入</span></div>
-            </div>
-            <div id="diskIoChart" class="system-chart" aria-label="磁盘读写历史图"></div>
-          </article>
-          <article class="panel sensors-panel">
-            <div class="panel-head"><div><span class="section-kicker">HARDWARE</span><h3>传感器</h3></div></div>
-            <div id="sensorList" class="sensor-list"><div class="empty-state compact">等待可用传感器</div></div>
-          </article>
-        </section>
       </section>
 
-      <section id="view-runtime" class="view" data-view-panel="runtime" aria-labelledby="runtimeTitle" hidden>
-        <div class="page-heading">
-          <div>
-            <span class="section-kicker">SYSTEM RUNTIME</span>
-            <h2 id="runtimeTitle">系统服务与运行时</h2>
-            <p>按需读取系统服务；容器和网络归因将在同一运行时视图中汇总。</p>
+      <section class="dashboard-section" data-dashboard-section="processes" data-dashboard-order="processes" aria-labelledby="processesTitle">
+        <div class="section-heading section-heading-with-stats"><div><span class="section-kicker">Live inventory</span><h2 id="processesTitle">Programs and processes</h2><p id="processSummary">Reading the system process list...</p></div><div class="view-stats"><span><b id="processTotal">--</b> collected</span><span><b id="processRunning">--</b> running</span></div></div>
+        <article class="panel process-card">
+          <div class="process-toolbar">
+            <div class="segmented" role="group" aria-label="Inventory mode"><button class="is-active" data-process-mode="programs" type="button">Programs</button><button data-process-mode="processes" type="button">Processes</button><button data-process-mode="tree" type="button">Tree</button></div>
+            <label class="search-field"><span aria-hidden="true">⌕</span><span class="sr-only">Search programs or processes</span><input id="processSearch" type="search" placeholder="Search name, PID, user, or command"></label>
+            <label class="select-field"><span class="sr-only">Process scope</span><select id="processScope"><option value="all">All users</option><option value="mine">Current user</option></select></label>
+            <label class="select-field process-only"><span class="sr-only">Process state</span><select id="processStatus"><option value="all">All states</option><option value="running">Running</option><option value="sleeping">Sleeping</option><option value="stopped">Stopped</option></select></label>
           </div>
-          <div id="runtimeSummary" class="view-stats"><span><b>--</b> 服务</span></div>
-        </div>
-
-        <article class="panel runtime-panel container-panel">
-          <div class="panel-head runtime-panel-head">
-            <div><span id="containerProvider" class="section-kicker">CONTAINER RUNTIME</span><h3>容器视图</h3></div>
-            <button id="refreshContainers" class="secondary-btn" type="button">刷新容器</button>
-          </div>
-          <div id="containerSummary" class="runtime-metric-strip">
-            <span><small>运行中</small><b>--</b></span><span><small>CPU</small><b>--</b></span><span><small>内存</small><b>--</b></span><span><small>网络 I/O</small><b>--</b></span>
-          </div>
-          <p id="containerNote" class="panel-note">正在检测 Docker 或 Podman…</p>
-          <div id="containerGrid" class="container-grid"><div class="skeleton-card"></div></div>
-        </article>
-
-        <article class="panel runtime-panel network-attribution-panel">
-          <div class="panel-head runtime-panel-head">
-            <div><span id="networkProvider" class="section-kicker">NETWORK ATTRIBUTION</span><h3>逐进程网络归因</h3></div>
-            <button id="refreshNetwork" class="secondary-btn" type="button">刷新网络</button>
-          </div>
-          <div id="networkSummary" class="runtime-metric-strip">
-            <span><small>归因下行</small><b>--</b></span><span><small>归因上行</small><b>--</b></span><span><small>连接</small><b>--</b></span>
-          </div>
-          <p id="networkNote" class="panel-note">正在检测逐进程吞吐与连接能力…</p>
-          <div class="table-scroll runtime-table-scroll">
-            <table class="process-table network-table">
-              <thead><tr><th>进程</th><th class="num">PID</th><th class="num">下行</th><th class="num">上行</th><th class="num">连接</th><th>远端端点</th></tr></thead>
-              <tbody id="networkTableBody"><tr><td colspan="6"><div class="table-loading">正在建立逐进程网络基线…</div></td></tr></tbody>
-            </table>
-          </div>
-          <div class="table-footer"><span id="networkVisibleCount">--</span></div>
-        </article>
-
-        <article class="panel runtime-panel">
-          <div class="panel-head runtime-panel-head">
-            <div><span id="servicesProvider" class="section-kicker">DETECTING</span><h3>系统服务</h3></div>
-            <div class="runtime-actions">
-              <label class="search-field compact-search">
-                <span aria-hidden="true">⌕</span>
-                <span class="sr-only">搜索系统服务</span>
-                <input id="serviceSearch" type="search" placeholder="搜索服务名称或描述">
-              </label>
-              <button id="refreshServices" class="secondary-btn" type="button">刷新服务</button>
-            </div>
-          </div>
-          <p id="servicesNote" class="panel-note">正在识别当前平台的服务管理器…</p>
-          <div class="table-scroll runtime-table-scroll">
-            <table class="process-table service-table">
-              <thead><tr><th>服务</th><th>状态</th><th class="num">PID</th><th class="num">状态码</th><th>范围</th></tr></thead>
-              <tbody id="serviceTableBody"><tr><td colspan="5"><div class="table-loading">正在读取系统服务…</div></td></tr></tbody>
-            </table>
-          </div>
-          <div class="table-footer"><span id="serviceVisibleCount">--</span></div>
+          <div class="table-scroll process-table-scroll"><table class="process-table"><thead id="processTableHead"></thead><tbody id="processTableBody"><tr><td><div class="table-loading">Building process inventory...</div></td></tr></tbody></table></div>
+          <div class="table-footer"><span id="visibleProcessCount">--</span><button id="showMoreProcesses" class="secondary-btn" type="button" hidden>Show more</button></div>
         </article>
       </section>
 
-      <section id="view-ai" class="view" data-view-panel="ai" aria-labelledby="aiTitle" hidden>
-        <div class="page-heading ai-heading">
-          <div>
-            <span class="section-kicker">PRESERVED CONTEXT</span>
-            <h2 id="aiTitle">AI 工作负载</h2>
-            <p>原有 Agent 监控能力被保留为系统看板中的专项视图。</p>
-          </div>
-          <div id="aiTotals" class="view-stats"><span><b>--</b> 活跃会话</span></div>
+      <section class="dashboard-section" data-dashboard-section="storage" data-dashboard-order="storage" aria-labelledby="storageTitle">
+        <div class="section-heading section-heading-with-stats"><div><span class="section-kicker">Local storage</span><h2 id="storageTitle">Capacity, health, and I/O</h2></div><div class="io-summary"><span class="io-read-stat">Read <b id="storageReadRate">--</b></span><span class="io-write-stat">Write <b id="storageWriteRate">--</b></span><span class="io-iops-stat">IOPS <b id="storageIops">--</b></span><span class="io-latency-stat">Latency <b id="storageLatency">--</b></span></div></div>
+        <div id="diskGrid" class="disk-grid"><div class="disk-card skeleton-card"></div></div>
+        <div class="storage-grid">
+          <article class="panel storage-chart-panel"><div class="panel-head"><div><span class="section-kicker">Throughput</span><h3>Disk activity</h3></div><div class="chart-legend"><span class="legend-read">Read</span><span class="legend-write">Write</span></div></div><div id="diskIoChart" class="system-chart" aria-label="Disk throughput history"></div><div id="sensorList" class="sensor-list"><div class="empty-state compact">Detecting available sensors</div></div></article>
+          <article class="panel storage-health-panel"><section><div class="panel-head"><div><span id="smartProvider" class="section-kicker">SMART</span><h3>Device health</h3></div></div><div id="smartDeviceList" class="device-list"><div class="empty-state compact">Reading device health...</div></div></section><section class="io-health-section"><div class="panel-head"><div><span class="section-kicker">Device I/O</span><h3>IOPS and latency</h3></div></div><div id="deviceIoList" class="device-list"><div class="empty-state compact">Waiting for disk activity...</div></div></section></article>
         </div>
-        <div id="aiZones" class="ai-zones">
-          <div class="zone-card skeleton-card"></div>
-          <div class="zone-card skeleton-card"></div>
-          <div class="zone-card skeleton-card"></div>
+      </section>
+
+      <section class="dashboard-section" data-dashboard-section="runtime" data-dashboard-order="runtime" aria-labelledby="runtimeTitle">
+        <div class="section-heading section-heading-with-stats"><div><span class="section-kicker">System runtime</span><h2 id="runtimeTitle">Network, services, and containers</h2></div><div id="runtimeSummary" class="view-stats"><span><b>--</b> services</span></div></div>
+        <div class="runtime-grid">
+          <article id="networkPanel" class="panel runtime-panel network-attribution-panel"><div class="panel-head runtime-panel-head"><div><span id="networkProvider" class="section-kicker">Network attribution</span><h3>Per-process network</h3></div><button id="refreshNetwork" class="secondary-btn" type="button">Refresh</button></div><div id="networkSummary" class="runtime-metric-strip"><span><small>Download</small><b>--</b></span><span><small>Upload</small><b>--</b></span><span><small>Connections</small><b>--</b></span></div><p id="networkNote" class="panel-note">Detecting per-process throughput and sockets...</p><div class="table-scroll runtime-table-scroll"><table class="process-table network-table"><thead><tr><th>Process</th><th class="num">PID</th><th class="num">Down</th><th class="num">Up</th><th class="num">Sockets</th><th>Remote endpoints</th></tr></thead><tbody id="networkTableBody"><tr><td colspan="6"><div class="table-loading">Building network attribution baseline...</div></td></tr></tbody></table></div><div class="table-footer"><span id="networkVisibleCount">--</span></div></article>
+          <article class="panel runtime-panel service-panel"><div class="panel-head runtime-panel-head"><div><span id="servicesProvider" class="section-kicker">Detecting</span><h3>System services</h3></div><button id="refreshServices" class="secondary-btn" type="button">Refresh</button></div><div class="runtime-actions"><label class="search-field compact-search"><span aria-hidden="true">⌕</span><span class="sr-only">Search services</span><input id="serviceSearch" type="search" placeholder="Search services"></label></div><p id="servicesNote" class="panel-note">Identifying the platform service manager...</p><div class="table-scroll runtime-table-scroll"><table class="process-table service-table"><thead><tr><th>Service</th><th>State</th><th class="num">PID</th><th class="num">Code</th><th>Scope</th></tr></thead><tbody id="serviceTableBody"><tr><td colspan="5"><div class="table-loading">Reading system services...</div></td></tr></tbody></table></div><div class="table-footer"><span id="serviceVisibleCount">--</span></div></article>
+          <article id="containerPanel" class="panel runtime-panel container-panel" data-auto-card="containers"><div class="panel-head runtime-panel-head"><div><span id="containerProvider" class="section-kicker">Container runtime</span><h3>Containers</h3></div><button id="refreshContainers" class="secondary-btn" type="button">Refresh</button></div><div id="containerSummary" class="runtime-metric-strip"><span><small>Running</small><b>--</b></span><span><small>CPU</small><b>--</b></span><span><small>Memory</small><b>--</b></span><span><small>Network I/O</small><b>--</b></span></div><p id="containerNote" class="panel-note">Detecting Docker or Podman...</p><div id="containerGrid" class="container-grid"><div class="skeleton-card"></div></div></article>
         </div>
+      </section>
+
+      <section class="dashboard-section" data-dashboard-section="coding" data-dashboard-order="coding" aria-labelledby="aiTitle">
+        <div class="section-heading section-heading-with-stats"><div><span class="section-kicker">AI workloads</span><h2 id="aiTitle">Coding sessions</h2><p>Agent activity remains available as system workload context.</p></div><div class="section-actions"><label class="switch-label"><input id="showIdleAiToggle" type="checkbox"><span>Show idle providers</span></label><div id="aiTotals" class="view-stats"><span><b>--</b> active sessions</span></div></div></div>
+        <div id="aiZones" class="ai-zones"><div class="zone-card skeleton-card"></div></div>
       </section>
     </main>
   </div>
 
-  <button id="drawerScrim" class="drawer-scrim" type="button" aria-label="关闭进程详情" hidden></button>
-  <aside id="detailsDrawer" class="details-drawer" aria-labelledby="detailsTitle" aria-hidden="true">
-    <div class="drawer-head">
-      <div>
-        <span class="section-kicker">PROCESS INSPECTOR</span>
-        <h2 id="detailsTitle">进程详情</h2>
-      </div>
-      <button id="closeDetails" class="icon-action" type="button" aria-label="关闭详情">×</button>
-    </div>
-    <div id="detailsBody" class="drawer-body"><div class="drawer-loading">正在读取进程详情…</div></div>
-  </aside>
-
+  <button id="drawerScrim" class="drawer-scrim" type="button" aria-label="Close process details" hidden></button>
+  <aside id="detailsDrawer" class="details-drawer" aria-labelledby="detailsTitle" aria-hidden="true"><div class="drawer-head"><div><span class="section-kicker">Process inspector</span><h2 id="detailsTitle">Process details</h2></div><button id="closeDetails" class="icon-action" type="button" aria-label="Close details">×</button></div><div id="detailsBody" class="drawer-body"><div class="drawer-loading">Reading process details...</div></div></aside>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js" defer></script>
 </body>
 </html>

@@ -333,7 +333,7 @@ class ServiceCollector:
             "launchd",
             "user",
             parse_launchctl_services(result.stdout),
-            "当前登录用户的 launchd 域；受保护的系统域可能需要更高权限。",
+            "launchd domain for the current login session; protected system domains may require elevated privileges.",
         )
 
     def _sample_systemd(self) -> dict[str, Any]:
@@ -364,7 +364,7 @@ class ServiceCollector:
             "systemd",
             "system",
             parse_systemctl_services(result.stdout),
-            "systemd 单元状态为只读清单；服务控制仍由系统权限策略负责。",
+            "systemd unit state is read-only here; service control remains subject to system permissions.",
         )
 
     @staticmethod
@@ -521,9 +521,9 @@ class NetworkAttributionCollector:
             },
             "items": items,
             "note": (
-                "nettop 提供逐进程字节差分；连接端点仅限当前用户可读取的进程。"
+                "nettop provides per-process byte deltas; socket endpoints are limited to processes readable by the current user."
                 if elapsed is not None
-                else "已建立 nettop 累计计数基线；下一次刷新后显示逐进程吞吐率。"
+                else "The nettop cumulative-counter baseline is ready; per-process rates appear after the next refresh."
             ),
             "sampled_at": time.time(),
         }
@@ -580,9 +580,9 @@ class NetworkAttributionCollector:
             },
             "items": items,
             "note": (
-                "当前平台未提供无特权逐进程字节计数；这里显示连接、监听端口和远端归因。"
+                "This platform exposes no unprivileged per-process byte counters; this view shows sockets, listeners, and remote endpoints."
                 if items
-                else "当前权限无法读取逐进程网络连接；Linux 吞吐归因通常需要 eBPF 或审计代理。"
+                else "Current permissions cannot read per-process sockets; Linux throughput attribution usually requires eBPF or an audit agent."
             ),
             "sampled_at": time.time(),
         }
@@ -677,7 +677,7 @@ class ContainerCollector:
                 "provider": "none",
                 "summary": {},
                 "items": [],
-                "note": "未检测到 Docker 或 Podman CLI；安装任一运行时后会自动出现容器清单。",
+                "note": "Docker and Podman CLIs were not detected. Install either runtime to populate the container inventory automatically.",
                 "sampled_at": time.time(),
             }
         self._cached = result
@@ -776,9 +776,9 @@ class ContainerCollector:
             },
             "items": items,
             "note": (
-                f"{provider} 容器清单与单次 stats 指标。"
+                f"{provider} container inventory with one-shot stats."
                 if metrics_available
-                else f"{provider} 清单可用，但运行时未返回 stats 指标。"
+                else f"{provider} inventory is available, but the runtime returned no stats."
             ),
             "sampled_at": time.time(),
         }

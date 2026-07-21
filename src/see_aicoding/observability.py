@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 DEFAULT_THRESHOLDS: dict[str, dict[str, Any]] = {
     "cpu": {
-        "label": "CPU 使用率",
+        "label": "CPU utilization",
         "warning": 75.0,
         "critical": 90.0,
         "hysteresis": 3.0,
@@ -23,7 +23,7 @@ DEFAULT_THRESHOLDS: dict[str, dict[str, Any]] = {
         "enabled": True,
     },
     "memory": {
-        "label": "内存使用率",
+        "label": "Memory utilization",
         "warning": 80.0,
         "critical": 92.0,
         "hysteresis": 3.0,
@@ -31,7 +31,7 @@ DEFAULT_THRESHOLDS: dict[str, dict[str, Any]] = {
         "enabled": True,
     },
     "gpu": {
-        "label": "GPU 使用率",
+        "label": "GPU utilization",
         "warning": 80.0,
         "critical": 95.0,
         "hysteresis": 3.0,
@@ -39,7 +39,7 @@ DEFAULT_THRESHOLDS: dict[str, dict[str, Any]] = {
         "enabled": True,
     },
     "disk": {
-        "label": "磁盘使用率",
+        "label": "Disk utilization",
         "warning": 80.0,
         "critical": 92.0,
         "hysteresis": 2.0,
@@ -47,7 +47,7 @@ DEFAULT_THRESHOLDS: dict[str, dict[str, Any]] = {
         "enabled": True,
     },
     "swap": {
-        "label": "交换空间使用率",
+        "label": "Swap utilization",
         "warning": 45.0,
         "critical": 75.0,
         "hysteresis": 3.0,
@@ -55,7 +55,7 @@ DEFAULT_THRESHOLDS: dict[str, dict[str, Any]] = {
         "enabled": True,
     },
     "disk_latency": {
-        "label": "磁盘平均延迟",
+        "label": "Average disk latency",
         "warning": 20.0,
         "critical": 50.0,
         "hysteresis": 5.0,
@@ -193,15 +193,15 @@ class ThresholdEngine:
             else float(rule[previous]) if previous in {"warning", "critical"} else None
         )
         if action == "resolved" and reason == "unavailable":
-            message = f"{rule['label']}数据暂不可用，已关闭当前告警"
+            message = f"{rule['label']} is unavailable; the active alert was closed"
         elif action == "resolved":
-            message = f"{rule['label']}已恢复至 {value:.1f}{rule['unit']}"
+            message = f"{rule['label']} recovered to {value:.1f}{rule['unit']}"
         elif action == "deescalated":
-            message = f"{rule['label']}已从严重降至警告：{value:.1f}{rule['unit']}"
+            message = f"{rule['label']} de-escalated from critical to warning at {value:.1f}{rule['unit']}"
         elif action == "escalated":
-            message = f"{rule['label']}升至严重：{value:.1f}{rule['unit']}"
+            message = f"{rule['label']} escalated to critical at {value:.1f}{rule['unit']}"
         else:
-            message = f"{rule['label']}达到{current}阈值：{value:.1f}{rule['unit']}"
+            message = f"{rule['label']} crossed the {current} threshold at {value:.1f}{rule['unit']}"
         return {
             "id": uuid.uuid4().hex,
             "timestamp": timestamp,

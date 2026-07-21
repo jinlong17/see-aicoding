@@ -30,6 +30,102 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 STATIC_PACKAGE = "see_aicoding.web_static"
 
+_DASHBOARD_SECTION_IDS = {
+    "leaders",
+    "processes",
+    "storage",
+    "runtime",
+    "coding",
+}
+_DASHBOARD_ORDER_IDS = {
+    "coding",
+    "overview",
+    "leaders",
+    "processes",
+    "storage",
+    "runtime",
+}
+_PROCESS_COLUMN_IDS = {
+    "identity",
+    "pid",
+    "user",
+    "state",
+    "cpu",
+    "memory",
+    "gpu",
+    "disk",
+    "network",
+    "threads",
+    "age",
+}
+DEFAULT_DASHBOARD_PREFERENCES = {
+    "density": "compact",
+    "hidden_sections": [],
+    "show_idle_ai": False,
+    "section_order": [
+        "coding",
+        "overview",
+        "leaders",
+        "processes",
+        "storage",
+        "runtime",
+    ],
+    "process_columns": [
+        "identity",
+        "pid",
+        "user",
+        "state",
+        "cpu",
+        "memory",
+        "gpu",
+        "disk",
+        "network",
+        "threads",
+        "age",
+    ],
+}
+
+
+def normalize_dashboard_preferences(value: object) -> dict:
+    """Return the safe, forwards-compatible subset of dashboard preferences."""
+    source = value if isinstance(value, dict) else {}
+    density = source.get("density")
+    hidden = source.get("hidden_sections")
+    columns = source.get("process_columns")
+    order = source.get("section_order")
+    if density not in {"compact", "comfortable"}:
+        density = DEFAULT_DASHBOARD_PREFERENCES["density"]
+    if not isinstance(hidden, list):
+        hidden = []
+    if not isinstance(columns, list):
+        columns = list(DEFAULT_DASHBOARD_PREFERENCES["process_columns"])
+    if not isinstance(order, list):
+        order = list(DEFAULT_DASHBOARD_PREFERENCES["section_order"])
+    safe_order = []
+    for item in order:
+        if isinstance(item, str) and item in _DASHBOARD_ORDER_IDS and item not in safe_order:
+            safe_order.append(item)
+    safe_order.extend(
+        item for item in DEFAULT_DASHBOARD_PREFERENCES["section_order"]
+        if item not in safe_order
+    )
+    safe_columns = [
+        item for item in columns
+        if isinstance(item, str) and item in _PROCESS_COLUMN_IDS
+    ]
+    if "identity" not in safe_columns:
+        safe_columns.insert(0, "identity")
+    return {
+        "density": density,
+        "hidden_sections": sorted({
+            item for item in hidden
+            if isinstance(item, str) and item in _DASHBOARD_SECTION_IDS
+        }),
+        "show_idle_ai": bool(source.get("show_idle_ai", False)),
+        "section_order": safe_order,
+        "process_columns": safe_columns,
+    }
+
 
 class MonitorState:
     def __init__(self, refresh_s: float):
@@ -129,6 +225,19 @@ class MonitorState:
             self._cached_at = 0.0
             return {"thresholds": values, "persisted": persisted}
 
+    def dashboard_preferences(self) -> dict:
+        stored = self.store.load_setting("dashboard_preferences", {})
+        return {
+            "preferences": normalize_dashboard_preferences(stored),
+            "persisted": self.store.available,
+        }
+
+    def update_dashboard_preferences(self, updates: dict) -> dict:
+        current = self.dashboard_preferences()["preferences"]
+        preferences = normalize_dashboard_preferences({**current, **updates})
+        persisted = self.store.save_setting("dashboard_preferences", preferences)
+        return {"preferences": preferences, "persisted": persisted}
+
     def history_snapshot(self, range_key: str) -> dict:
         return self.store.query_history(range_key)
 
@@ -191,6 +300,9 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/thresholds":
             self._serve_json(self.monitor_server.state.threshold_snapshot())
             return
+        if parsed.path == "/api/dashboard-preferences":
+            self._serve_json(self.monitor_server.state.dashboard_preferences())
+            return
         if parsed.path == "/api/history":
             query = parse_qs(parsed.query)
             range_key = (query.get("range") or ["1h"])[0]
@@ -241,6 +353,9 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/thresholds":
             self._serve_threshold_update()
             return
+        if parsed.path == "/api/dashboard-preferences":
+            self._serve_dashboard_preferences_update()
+            return
         if parsed.path.startswith("/api/process/") and parsed.path.endswith("/action"):
             self._serve_process_action(parsed.path)
             return
@@ -284,6 +399,30 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             if not isinstance(updates, dict):
                 raise ValueError("Threshold updates must be an object.")
             result = self.monitor_server.state.update_thresholds(updates)
+        except TypeError as exc:
+            self._serve_json({"error": str(exc)}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+            return
+        except json.JSONDecodeError:
+            self._serve_json({"error": "Invalid JSON body."}, HTTPStatus.BAD_REQUEST)
+            return
+        except ValueError as exc:
+            self._serve_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+        self._serve_json(result)
+
+    def _serve_dashboard_preferences_update(self) -> None:
+        if not self._request_origin_allowed():
+            self._serve_json(
+                {"error": "Cross-origin preference changes are blocked."},
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        try:
+            payload = self._read_json_object(max_bytes=16384)
+            updates = payload.get("preferences", payload)
+            if not isinstance(updates, dict):
+                raise ValueError("Dashboard preferences must be an object.")
+            result = self.monitor_server.state.update_dashboard_preferences(updates)
         except TypeError as exc:
             self._serve_json({"error": str(exc)}, HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
             return
