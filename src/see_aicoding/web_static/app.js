@@ -57,7 +57,11 @@ const ZH_TEXT = {
   "Threads": "线程",
   "Age": "时长",
   "AI service quotas": "AI 服务额度",
-  "Optional local percentages. No credentials or private provider APIs are read.": "可选的本地百分比；不会读取凭证或非公开服务接口。",
+  "Show quota cards and automatic updates": "显示额度卡片并自动更新",
+  "Hide quotas": "隐藏额度",
+  "Show quotas": "显示额度",
+  "Automatic local sources take priority. Manual values fill missing windows; no credentials are read.": "自动本地数据优先；手动值仅补充缺失窗口，且不会读取凭证。",
+  "Claude automatic updates require an explicit status-line command:": "Claude 自动更新需要明确配置状态栏命令：",
   "5h used %": "5 小时已用 %",
   "Weekly used %": "每周已用 %",
   "Reading": "读取中",
@@ -135,6 +139,7 @@ const ZH_TEXT = {
   "AI workloads": "AI 工作负载",
   "Agent activity remains available as system workload context.": "智能助手活动作为系统工作负载上下文展示。",
   "Show idle providers": "显示空闲服务",
+  "Refresh quotas": "刷新额度",
   "AI service quotas": "AI 服务额度",
   "Process inspector": "进程检查器",
   "Process details": "进程详情",
@@ -213,6 +218,10 @@ const state = {
   processTimer: null,
   expandedAiSessions: new Set(),
   providerUsage: null,
+  quotaRefreshTimer: null,
+  quotaRefreshAttempts: 0,
+  quotaFetchFailures: 0,
+  quotaRequestInFlight: false,
   pendingSnapshot: null,
   renderFrame: null,
   runtimeVisible: false,
@@ -225,6 +234,7 @@ const state = {
     performance_mode: "balanced",
     hidden_sections: [],
     show_idle_ai: false,
+    show_quota_cards: true,
     section_order: [...SECTION_ORDER_DEFAULT],
     process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
     provider_quotas: {
@@ -263,7 +273,8 @@ const el = Object.fromEntries(
     "containerProvider", "containerSummary", "containerNote", "refreshContainers",
     "containerGrid", "containerPanel", "thirdLeaderCard", "thirdLeaderGlyph",
     "thirdLeaderTitle", "thirdLeaderNote", "showIdleAiToggle", "customizeMenu",
-    "resetPreferences", "sectionOrderList", "languageSelect", "themeSelect", "performanceMode", "quotaGrid",
+    "resetPreferences", "sectionOrderList", "languageSelect", "themeSelect", "performanceMode", "quotaGrid", "refreshQuotas",
+    "showQuotaCardsSetting", "toggleQuotaVisibility",
     "drawerScrim", "detailsTitle", "detailsBody", "closeDetails", "toast",
   ].map((id) => [id, document.getElementById(id)])
 );
@@ -1355,6 +1366,7 @@ function normalizePreferences(value = {}) {
     performance_mode: "balanced",
     hidden_sections: [],
     show_idle_ai: false,
+    show_quota_cards: true,
     section_order: SECTION_ORDER_DEFAULT,
     process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
     provider_quotas: {
@@ -1391,6 +1403,7 @@ function normalizePreferences(value = {}) {
     performance_mode: Object.hasOwn(PERFORMANCE_INTERVALS, value.performance_mode) ? value.performance_mode : defaults.performance_mode,
     hidden_sections: [...new Set(hidden)],
     show_idle_ai: Boolean(value.show_idle_ai),
+    show_quota_cards: value.show_quota_cards === undefined ? defaults.show_quota_cards : Boolean(value.show_quota_cards),
     section_order: sectionOrder,
     process_columns: ["identity", ...columns.filter((item) => item !== "identity")],
     provider_quotas: providerQuotas,
@@ -1441,6 +1454,16 @@ function applyPreferences(preferences, rerender = true) {
     input.checked = state.preferences.process_columns.includes(input.dataset.processColumn);
   });
   el.showIdleAiToggle.checked = state.preferences.show_idle_ai;
+  el.showQuotaCardsSetting.checked = state.preferences.show_quota_cards;
+  el.quotaGrid.hidden = !state.preferences.show_quota_cards;
+  el.refreshQuotas.hidden = !state.preferences.show_quota_cards;
+  el.toggleQuotaVisibility.textContent = state.preferences.show_quota_cards
+    ? quotaLocale("Hide quotas", "隐藏额度")
+    : quotaLocale("Show quotas", "显示额度");
+  el.toggleQuotaVisibility.setAttribute("aria-expanded", String(state.preferences.show_quota_cards));
+  if (!state.preferences.show_quota_cards) {
+    window.clearTimeout(state.quotaRefreshTimer);
+  }
   el.languageSelect.value = state.preferences.language;
   el.themeSelect.value = state.preferences.theme;
   el.performanceMode.value = state.preferences.performance_mode;
@@ -1451,6 +1474,9 @@ function applyPreferences(preferences, rerender = true) {
   });
   if (rerender && state.snapshot) {
     renderAll();
+  }
+  if (previousLanguage !== state.preferences.language && state.providerUsage) {
+    renderProviderUsage(state.providerUsage);
   }
   if (previousLanguage !== state.preferences.language || !rerender) localizeDom();
   if (previousPerformanceMode !== state.preferences.performance_mode && state.eventSource && !state.paused) startEvents();
@@ -1479,7 +1505,8 @@ function schedulePreferenceSave() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
       applyPreferences(payload.preferences || state.preferences, false);
-      fetchProviderUsage();
+      if (state.preferences.show_quota_cards) fetchProviderUsage();
+      else window.clearTimeout(state.quotaRefreshTimer);
     } catch (error) {
       showToast(error.message || "Could not save dashboard preferences", true);
     }
@@ -1510,6 +1537,7 @@ function updatePreferencesFromControls() {
     performance_mode: el.performanceMode.value,
     hidden_sections: hidden,
     show_idle_ai: el.showIdleAiToggle.checked,
+    show_quota_cards: el.showQuotaCardsSetting.checked,
     section_order: state.preferences.section_order,
     process_columns: columns,
     provider_quotas: providerQuotas,
@@ -1528,41 +1556,141 @@ function moveDashboardSection(id, direction) {
   schedulePreferenceSave();
 }
 
-function quotaWindowLabel(id) {
-  return id === "five_hour" ? "5 hours" : id === "weekly" ? "Weekly" : id;
+function quotaLocale(english, chinese) {
+  return state.preferences.language === "zh-CN" ? chinese : english;
+}
+
+function quotaWindowLabel(windowModel) {
+  if (windowModel.id === "five_hour") return quotaLocale("5 hours", "5 小时");
+  if (windowModel.id === "weekly") return quotaLocale("Weekly", "每周");
+  const minutes = Number(windowModel.duration_minutes);
+  if (Number.isFinite(minutes) && minutes > 0 && minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return quotaLocale(`${days} days`, `${days} 天`);
+  }
+  if (Number.isFinite(minutes) && minutes > 0 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return quotaLocale(`${hours} hours`, `${hours} 小时`);
+  }
+  return String(windowModel.id || quotaLocale("Quota", "额度"));
+}
+
+function quotaSourceLabel(kind) {
+  const labels = {
+    codex_app_server: quotaLocale("Codex app-server", "Codex 本地服务"),
+    claude_statusline: quotaLocale("Claude status line", "Claude 状态栏"),
+    manual_local: quotaLocale("Manual", "手动"),
+  };
+  return labels[kind] || quotaLocale("Not configured", "未配置");
+}
+
+function quotaProviderStatus(provider) {
+  const hasValues = (provider.windows || []).some((windowModel) => windowModel.used_percent !== null && windowModel.used_percent !== undefined);
+  if (provider.refreshing && !hasValues) return quotaLocale("Refreshing", "刷新中");
+  if (provider.status === "stale") return quotaLocale("Stale", "数据已过期");
+  if (provider.automatic_available) return quotaLocale("Automatic", "自动更新");
+  if (provider.manual_fallback || hasValues) return quotaLocale("Manual fallback", "手动后备");
+  if (provider.status === "error") return quotaLocale("Error", "错误");
+  return quotaLocale("Unavailable", "不可用");
+}
+
+function quotaProviderNote(provider) {
+  if (provider.automatic_available) {
+    return provider.manual_fallback
+      ? quotaLocale("Automatic local source · manual fill", "自动本地数据 · 手动补充")
+      : quotaLocale("Automatic local source", "自动本地数据");
+  }
+  if (provider.manual_fallback) return quotaLocale("Manual local fallback", "本地手动后备");
+  if (provider.id === "claude") {
+    return quotaLocale(
+      "Configure: see-aicoding --capture-claude-usage",
+      "请配置：see-aicoding --capture-claude-usage",
+    );
+  }
+  if (provider.id === "cursor") {
+    return quotaLocale("No supported personal quota source", "没有受支持的个人额度数据源");
+  }
+  return provider.status === "refreshing"
+    ? quotaLocale("Reading the local Codex profile", "正在读取本地 Codex 配置")
+    : quotaLocale("Local Codex quota unavailable", "本地 Codex 额度不可用");
 }
 
 function renderProviderUsage(model) {
   const providers = model?.providers || [];
   const colors = { claude: "var(--claude)", chatgpt: "var(--codex)", cursor: "var(--cursor)" };
   el.quotaGrid.innerHTML = providers.length ? providers.map((provider) => {
-    const available = provider.status === "available";
     const windows = provider.windows || [];
-    return `<article class="quota-card" style="--quota-color:${colors[provider.id] || "var(--line-strong)"}">
-      <div class="quota-card-head"><h3>${escapeHtml(provider.display_name)}</h3><span>${available ? "Manual local values" : "Not configured"}</span></div>
+    const providerNote = quotaProviderNote(provider);
+    const descriptionId = `quota-note-${provider.id}`;
+    return `<article class="quota-card" style="--quota-color:${colors[provider.id] || "var(--line-strong)"}" aria-describedby="${descriptionId}" title="${escapeHtml(providerNote)}">
+      <div class="quota-card-head"><h3>${escapeHtml(provider.display_name)}</h3><span>${escapeHtml(quotaProviderStatus(provider))}</span></div>
       <div class="quota-windows">${windows.map((windowModel) => {
         const used = windowModel.used_percent;
         const remaining = windowModel.remaining_percent;
+        const available = used !== null && used !== undefined;
+        const windowLabel = quotaWindowLabel(windowModel);
+        const resetLabel = windowModel.resets_at
+          ? `${quotaLocale("Resets", "重置")} ${formatEventTime(windowModel.resets_at)}`
+          : quotaLocale("Reset time unavailable", "重置时间不可用");
+        const progressValue = available
+          ? `aria-valuenow="${clamp(used)}"`
+          : `aria-valuetext="${quotaLocale("Unavailable", "不可用")}"`;
         return `<div class="quota-window">
-          <div class="quota-window-head"><span>${quotaWindowLabel(windowModel.id)}</span><b>${used === null || used === undefined ? "--" : formatPct(used)}</b></div>
-          <div class="quota-track" role="progressbar" aria-label="${escapeHtml(provider.display_name)} ${quotaWindowLabel(windowModel.id)} used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${used ?? 0}"><span style="width:${clamp(used || 0)}%"></span></div>
-          <div class="quota-window-stats"><span>Used<b>${used === null || used === undefined ? "--" : formatPct(used)}</b></span><span>Remaining<b>${remaining === null || remaining === undefined ? "--" : formatPct(remaining)}</b></span></div>
+          <div class="quota-gauge" style="--gauge-value:${clamp(used || 0)}%" role="progressbar" aria-label="${escapeHtml(provider.display_name)} ${escapeHtml(windowLabel)} ${quotaLocale("used", "已用")}" aria-valuemin="0" aria-valuemax="100" ${progressValue}><span>${available ? `${Math.round(used)}%` : "--"}</span></div>
+          <div class="quota-window-copy"><b>${escapeHtml(windowLabel)}</b><span>${quotaLocale("Remaining", "剩余")} ${remaining === null || remaining === undefined ? "--" : formatPct(remaining)}</span><small title="${escapeHtml(resetLabel)}">${escapeHtml(resetLabel)}</small></div>
         </div>`;
       }).join("")}</div>
-      <div class="quota-card-foot"><span>${available ? "Manual local values" : escapeHtml(provider.reason || "Not configured")}</span><span>${provider.observed_at ? formatEventTime(provider.observed_at) : "--"}</span></div>
+      <div class="quota-card-foot"><span>${escapeHtml(quotaSourceLabel(provider.source?.kind))}</span><span>${provider.observed_at ? formatEventTime(provider.observed_at) : "--"}</span></div>
+      <span id="${descriptionId}" class="sr-only">${escapeHtml(providerNote)}</span>
     </article>`;
-  }).join("") : `<div class="empty-state">No quota providers are available</div>`;
-  if (state.preferences.language === "zh-CN") localizeDom(el.quotaGrid);
+  }).join("") : `<div class="empty-state">${quotaLocale("No quota providers are available", "没有可用的额度服务")}</div>`;
 }
 
-async function fetchProviderUsage() {
+function scheduleQuotaRefreshPoll() {
+  window.clearTimeout(state.quotaRefreshTimer);
+  if (!state.preferences.show_quota_cards || state.paused || document.hidden || !state.providerUsage) return;
+  if (state.providerUsage.refreshing) {
+    if (state.quotaRefreshAttempts >= 14) return;
+    state.quotaRefreshAttempts += 1;
+    state.quotaRefreshTimer = window.setTimeout(() => fetchProviderUsage(false, true), 750);
+    return;
+  }
+  state.quotaRefreshAttempts = 0;
+  const nextRefreshAt = Number(state.providerUsage.next_refresh_at || 0);
+  if (!nextRefreshAt) return;
+  const delay = Math.max(1000, nextRefreshAt * 1000 - Date.now() + 100);
+  state.quotaRefreshTimer = window.setTimeout(
+    () => fetchProviderUsage(false, true),
+    Math.min(delay, 2_147_483_647),
+  );
+}
+
+async function fetchProviderUsage(force = false, polling = false) {
+  if (!state.preferences.show_quota_cards) return;
+  if (state.quotaRequestInFlight) return;
+  state.quotaRequestInFlight = true;
+  if (force) {
+    state.quotaRefreshAttempts = 0;
+    window.clearTimeout(state.quotaRefreshTimer);
+  } else if (!polling) {
+    state.quotaRefreshAttempts = 0;
+  }
+  el.refreshQuotas.disabled = true;
   try {
-    const response = await fetch("/api/provider-usage", { cache: "no-store" });
+    const endpoint = force ? "/api/provider-usage?refresh=1" : "/api/provider-usage";
+    const response = await fetch(endpoint, { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     state.providerUsage = payload;
+    state.quotaFetchFailures = 0;
   } catch (error) {
+    state.quotaFetchFailures += 1;
+    const retrySeconds = Math.min(
+      600,
+      30 * (2 ** Math.min(state.quotaFetchFailures - 1, 5)),
+    );
     state.providerUsage = {
+      next_refresh_at: Date.now() / 1000 + retrySeconds,
       providers: ["claude", "chatgpt", "cursor"].map((id) => ({
         id,
         display_name: id === "chatgpt" ? "ChatGPT" : id[0].toUpperCase() + id.slice(1),
@@ -1571,8 +1699,12 @@ async function fetchProviderUsage() {
         reason: error.message || "Quota data unavailable",
       })),
     };
+  } finally {
+    state.quotaRequestInFlight = false;
+    el.refreshQuotas.disabled = false;
   }
   renderProviderUsage(state.providerUsage);
+  scheduleQuotaRefreshPoll();
 }
 
 function renderAiProjects(projects) {
@@ -2007,10 +2139,12 @@ el.pauseBtn.addEventListener("click", () => {
     stopEvents();
     stopRuntimePolling();
     stopProcessPolling();
+    window.clearTimeout(state.quotaRefreshTimer);
   } else {
     startEvents();
     startRuntimePolling();
     startProcessPolling();
+    scheduleQuotaRefreshPoll();
   }
   localizeDom(el.pauseBtn);
 });
@@ -2042,7 +2176,7 @@ el.showMoreProcesses.addEventListener("click", () => {
 el.saveThresholds.addEventListener("click", saveThresholds);
 
 document.addEventListener("change", (event) => {
-  if (event.target.matches("[data-section-toggle], [data-process-column], [data-quota-provider], input[name='dashboardDensity'], #showIdleAiToggle, #languageSelect, #themeSelect, #performanceMode")) {
+  if (event.target.matches("[data-section-toggle], [data-process-column], [data-quota-provider], input[name='dashboardDensity'], #showIdleAiToggle, #showQuotaCardsSetting, #languageSelect, #themeSelect, #performanceMode")) {
     updatePreferencesFromControls();
   }
 });
@@ -2055,6 +2189,7 @@ el.resetPreferences.addEventListener("click", () => {
     performance_mode: "balanced",
     hidden_sections: [],
     show_idle_ai: false,
+    show_quota_cards: true,
     section_order: [...SECTION_ORDER_DEFAULT],
     process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
     provider_quotas: {
@@ -2075,6 +2210,14 @@ el.serviceSearch.addEventListener("input", (event) => {
 el.refreshServices.addEventListener("click", () => fetchServices(true));
 el.refreshNetwork.addEventListener("click", () => fetchNetwork(true));
 el.refreshContainers.addEventListener("click", () => fetchContainers(true));
+el.refreshQuotas.addEventListener("click", () => fetchProviderUsage(true));
+el.toggleQuotaVisibility.addEventListener("click", () => {
+  applyPreferences({
+    ...state.preferences,
+    show_quota_cards: !state.preferences.show_quota_cards,
+  });
+  schedulePreferenceSave();
+});
 
 el.closeDetails.addEventListener("click", closeProcess);
 el.drawerScrim.addEventListener("click", closeProcess);
@@ -2126,17 +2269,19 @@ document.addEventListener("visibilitychange", () => {
     stopEvents();
     stopRuntimePolling();
     stopProcessPolling();
+    window.clearTimeout(state.quotaRefreshTimer);
   } else if (!state.paused) {
     startEvents();
     startRuntimePolling();
     startProcessPolling();
+    if (state.preferences.show_quota_cards) scheduleQuotaRefreshPoll();
   }
 });
 
 async function bootstrap() {
   applyPreferences(state.preferences, false);
   await fetchPreferences();
-  await fetchProviderUsage();
+  if (state.preferences.show_quota_cards) await fetchProviderUsage();
   startEvents();
   fetchHistory(state.historyRange);
   localizeDom();

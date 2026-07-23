@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import unittest
 from unittest import mock
 
@@ -35,6 +36,7 @@ class DashboardPreferencesTests(unittest.TestCase):
         self.assertEqual(result["theme"], "deep")
         self.assertEqual(result["performance_mode"], "balanced")
         self.assertEqual(result["hidden_sections"], [])
+        self.assertTrue(result["show_quota_cards"])
         self.assertEqual(result["section_order"][0], "coding")
         self.assertIn("network", result["process_columns"])
         self.assertEqual(
@@ -48,6 +50,7 @@ class DashboardPreferencesTests(unittest.TestCase):
                 "language": "zh-CN",
                 "theme": "mint",
                 "performance_mode": "efficient",
+                "show_quota_cards": False,
                 "provider_quotas": {
                     "claude": {
                         "five_hour_used_percent": "150.75",
@@ -67,6 +70,7 @@ class DashboardPreferencesTests(unittest.TestCase):
         self.assertEqual(result["language"], "zh-CN")
         self.assertEqual(result["theme"], "mint")
         self.assertEqual(result["performance_mode"], "efficient")
+        self.assertFalse(result["show_quota_cards"])
         self.assertEqual(
             result["provider_quotas"],
             {
@@ -101,6 +105,25 @@ class DashboardPreferencesTests(unittest.TestCase):
         self.assertEqual(result["performance_mode"], "balanced")
         self.assertIsNone(result["quota_updated_at"])
 
+    def test_updating_quota_visibility_pauses_the_collector(self) -> None:
+        current = normalize_dashboard_preferences({"show_quota_cards": True})
+        state = object.__new__(MonitorState)
+        state.dashboard_preferences = mock.Mock(
+            return_value={"preferences": current, "persisted": True}
+        )
+        state.store = mock.Mock()
+        state.store.save_setting.return_value = True
+        state.usage = mock.Mock()
+        state._preferences_lock = threading.Lock()
+        state._dashboard_preferences = current
+        state._dashboard_preferences_persisted = True
+
+        result = state.update_dashboard_preferences({"show_quota_cards": False})
+
+        self.assertFalse(result["preferences"]["show_quota_cards"])
+        self.assertTrue(result["persisted"])
+        state.usage.set_enabled.assert_called_once_with(False)
+
     def test_provider_usage_exposes_three_services_and_remaining_percent(self) -> None:
         preferences = normalize_dashboard_preferences(
             {
@@ -125,10 +148,29 @@ class DashboardPreferencesTests(unittest.TestCase):
         state.dashboard_preferences = mock.Mock(
             return_value={"preferences": preferences, "persisted": False}
         )
+        state.usage = mock.Mock()
+        state.usage.sample.return_value = {
+            "refreshing": False,
+            "next_refresh_at": 9999.0,
+            "providers": [
+                {
+                    "id": provider_id,
+                    "status": "unsupported",
+                    "source": {
+                        "kind": "unsupported",
+                        "scope": "subscription",
+                        "authoritative": False,
+                    },
+                    "windows": [],
+                    "reason": "No automatic source.",
+                }
+                for provider_id in ("claude", "chatgpt", "cursor")
+            ],
+        }
 
         result = state.provider_usage()
 
-        self.assertEqual(result["schema_version"], 1)
+        self.assertEqual(result["schema_version"], 2)
         self.assertEqual(
             [provider["id"] for provider in result["providers"]],
             ["claude", "chatgpt", "cursor"],
@@ -148,7 +190,8 @@ class DashboardPreferencesTests(unittest.TestCase):
                     [(window["id"], window["duration_minutes"]) for window in provider["windows"]],
                     [("five_hour", 300), ("weekly", 10080)],
                 )
-                self.assertEqual(provider["source"]["kind"], "manual_local")
+                expected_source = "unsupported" if provider_id == "cursor" else "manual_local"
+                self.assertEqual(provider["source"]["kind"], expected_source)
                 self.assertFalse(provider["source"]["authoritative"])
 
         self.assertEqual(by_id["claude"]["windows"][0]["remaining_percent"], 87.75)
@@ -158,6 +201,62 @@ class DashboardPreferencesTests(unittest.TestCase):
         self.assertEqual(by_id["chatgpt"]["observed_at"], 9876.5)
         self.assertEqual(by_id["cursor"]["status"], "unsupported")
         self.assertIsNone(by_id["cursor"]["observed_at"])
+
+    def test_automatic_quota_overrides_manual_and_manual_fills_missing_window(self) -> None:
+        preferences = normalize_dashboard_preferences(
+            {
+                "provider_quotas": {
+                    "chatgpt": {
+                        "five_hour_used_percent": 22,
+                        "weekly_used_percent": 88,
+                    },
+                },
+                "quota_updated_at": 1234,
+            }
+        )
+        state = object.__new__(MonitorState)
+        state.dashboard_preferences = mock.Mock(
+            return_value={"preferences": preferences, "persisted": False}
+        )
+        state.usage = mock.Mock()
+        state.usage.sample.return_value = {
+            "refreshing": False,
+            "next_refresh_at": 4321,
+            "providers": [
+                {
+                    "id": "chatgpt",
+                    "status": "available",
+                    "source": {
+                        "kind": "codex_app_server",
+                        "scope": "active_codex_profile",
+                        "authoritative": True,
+                    },
+                    "observed_at": 3456,
+                    "windows": [
+                        {
+                            "id": "weekly",
+                            "duration_minutes": 10080,
+                            "used_percent": 51,
+                            "remaining_percent": 49,
+                            "resets_at": 4567,
+                        }
+                    ],
+                }
+            ],
+        }
+
+        result = state.provider_usage(force=True)
+        chatgpt = next(item for item in result["providers"] if item["id"] == "chatgpt")
+
+        self.assertEqual(chatgpt["source"]["kind"], "codex_app_server")
+        self.assertTrue(chatgpt["source"]["authoritative"])
+        self.assertEqual(chatgpt["windows"][0]["used_percent"], 22)
+        self.assertEqual(chatgpt["windows"][0]["source_kind"], "manual_local")
+        self.assertEqual(chatgpt["windows"][1]["used_percent"], 51)
+        self.assertEqual(chatgpt["windows"][1]["source_kind"], "codex_app_server")
+        self.assertTrue(chatgpt["automatic_available"])
+        self.assertTrue(chatgpt["manual_fallback"])
+        state.usage.sample.assert_called_once_with(force=True)
 
     def test_compact_stream_omits_heavy_compatibility_arrays(self) -> None:
         full = {

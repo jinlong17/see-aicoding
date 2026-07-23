@@ -2,18 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import signal
 import sys
 import time
 
-import psutil
-from rich.console import Console
-from rich.live import Live
-
 from . import __version__
-from .cursor_ext import scan_installed_extensions
-from .monitor import History, Sampler, build_sessions
-from .render import render_all
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -41,12 +35,43 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Web monitor host (default 127.0.0.1; localhost only).")
     p.add_argument("--port", type=int, default=8765,
                    help="Web monitor port (default 8765).")
+    p.add_argument(
+        "--capture-claude-usage",
+        action="store_true",
+        help=(
+            "Read one Claude Code status-line JSON payload from stdin, persist only "
+            "its quota fields locally, print a compact status line, and exit."
+        ),
+    )
     p.add_argument("--version", action="version", version=f"see-aicoding {__version__}")
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    if args.capture_claude_usage:
+        from .usage import MAX_STATUSLINE_BYTES, capture_claude_statusline
+
+        raw = sys.stdin.buffer.read(MAX_STATUSLINE_BYTES + 1)
+        if len(raw) > MAX_STATUSLINE_BYTES:
+            print("Claude status-line payload exceeds the 1 MiB safety limit.", file=sys.stderr)
+            return 2
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+            print(capture_claude_statusline(payload))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            print(f"Unable to capture Claude quota data: {exc}", file=sys.stderr)
+            return 2
+        return 0
+
+    import psutil
+    from rich.console import Console
+    from rich.live import Live
+
+    from .cursor_ext import scan_installed_extensions
+    from .monitor import History, Sampler, build_sessions
+    from .render import render_all
+
     refresh = max(0.5, args.interval)
     show_tree = not args.no_tree
     hide_idle = not args.all

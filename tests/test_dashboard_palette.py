@@ -79,6 +79,35 @@ class DashboardPaletteTests(unittest.TestCase):
         self.assertNotIn('setInterval(fetchNetworkAttribution, 4000)', javascript)
         self.assertNotIn('setInterval(fetchContainers, 8000)', javascript)
 
+    def test_language_switch_rerenders_dynamic_quota_labels(self) -> None:
+        javascript = JS_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "previousLanguage !== state.preferences.language && state.providerUsage",
+            javascript,
+        )
+        self.assertIn("renderProviderUsage(state.providerUsage)", javascript)
+
+    def test_quota_cards_have_persistent_visibility_and_collection_controls(self) -> None:
+        css = CSS_PATH.read_text(encoding="utf-8")
+        javascript = JS_PATH.read_text(encoding="utf-8")
+        html = HTML_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('id="showQuotaCardsSetting"', html)
+        self.assertIn('id="toggleQuotaVisibility"', html)
+        self.assertIn('aria-controls="quotaGrid"', html)
+        self.assertIn('aria-expanded="true"', html)
+        self.assertIn(".quota-gauge", css)
+        self.assertIn("conic-gradient", css)
+        self.assertIn(".section-actions { width: 100%; flex-wrap: wrap;", css)
+        self.assertIn("show_quota_cards: true", javascript)
+        self.assertIn("if (!state.preferences.show_quota_cards) return;", javascript)
+        self.assertIn("el.quotaGrid.hidden = !state.preferences.show_quota_cards", javascript)
+        self.assertIn("state.providerUsage.next_refresh_at", javascript)
+        self.assertIn("state.quotaFetchFailures += 1", javascript)
+        self.assertIn("next_refresh_at: Date.now() / 1000 + retrySeconds", javascript)
+        self.assertIn('aria-valuetext="${quotaLocale("Unavailable", "不可用")}"', javascript)
+
 
 if __name__ == "__main__":
     unittest.main()

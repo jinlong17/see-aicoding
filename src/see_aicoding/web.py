@@ -29,6 +29,7 @@ from .telemetry import (
     inspect_process,
     manage_process,
 )
+from .usage import UsageCollector
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -70,6 +71,7 @@ DEFAULT_DASHBOARD_PREFERENCES = {
     "performance_mode": "balanced",
     "hidden_sections": [],
     "show_idle_ai": False,
+    "show_quota_cards": True,
     "section_order": [
         "coding",
         "overview",
@@ -179,10 +181,140 @@ def normalize_dashboard_preferences(value: object) -> dict:
             if isinstance(item, str) and item in _DASHBOARD_SECTION_IDS
         }),
         "show_idle_ai": bool(source.get("show_idle_ai", False)),
+        "show_quota_cards": bool(source.get("show_quota_cards", True)),
         "section_order": safe_order,
         "process_columns": safe_columns,
         "provider_quotas": provider_quotas,
         "quota_updated_at": quota_updated_at,
+    }
+
+
+def merge_provider_usage(automatic: object, preferences: dict) -> dict:
+    """Merge automatic quotas with manual values that fill only missing windows."""
+    automatic = automatic if isinstance(automatic, dict) else {}
+    automatic_providers = {
+        item.get("id"): item
+        for item in automatic.get("providers") or []
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    quotas = preferences["provider_quotas"]
+    provider_meta = (
+        ("claude", "Claude", "claude"),
+        ("chatgpt", "ChatGPT", "codex"),
+        ("cursor", "Cursor", "cursor"),
+    )
+    manual_window_meta = (
+        ("five_hour", 300, "five_hour_used_percent"),
+        ("weekly", 10080, "weekly_used_percent"),
+    )
+    providers = []
+    for provider_id, display_name, zone_id in provider_meta:
+        automatic_provider = automatic_providers.get(provider_id) or {}
+        automatic_source = automatic_provider.get("source")
+        automatic_source = automatic_source if isinstance(automatic_source, dict) else {
+            "kind": "unsupported",
+            "scope": "subscription",
+            "authoritative": False,
+        }
+        automatic_windows = {}
+        automatic_extra_windows = []
+        for window in automatic_provider.get("windows") or []:
+            if not isinstance(window, dict) or not isinstance(window.get("id"), str):
+                continue
+            normalized = {
+                **window,
+                "source_kind": automatic_source.get("kind"),
+                "authoritative": bool(automatic_source.get("authoritative")),
+            }
+            window_id = normalized["id"]
+            if window_id in {"five_hour", "weekly"}:
+                automatic_windows[window_id] = normalized
+            else:
+                automatic_extra_windows.append(normalized)
+
+        windows = []
+        manual_values_used = False
+        for window_id, duration_minutes, key in manual_window_meta:
+            if window_id in automatic_windows:
+                windows.append(automatic_windows[window_id])
+                continue
+            used = quotas[provider_id][key]
+            manual_values_used = manual_values_used or used is not None
+            windows.append(
+                {
+                    "id": window_id,
+                    "duration_minutes": duration_minutes,
+                    "used_percent": used,
+                    "remaining_percent": (
+                        round(100.0 - used, 2) if used is not None else None
+                    ),
+                    "resets_at": None,
+                    "source_kind": "manual_local" if used is not None else None,
+                    "authoritative": False,
+                }
+            )
+        windows.extend(automatic_extra_windows)
+
+        automatic_available = any(
+            window.get("used_percent") is not None
+            for window in automatic_windows.values()
+        ) or any(
+            window.get("used_percent") is not None
+            for window in automatic_extra_windows
+        )
+        any_available = any(window.get("used_percent") is not None for window in windows)
+        automatic_status = str(automatic_provider.get("status") or "unavailable")
+        if automatic_available:
+            status = "stale" if automatic_status == "stale" else "available"
+            source = automatic_source
+            observed_at = automatic_provider.get("observed_at")
+            reason = automatic_provider.get("reason")
+        elif any_available:
+            status = "available"
+            source = {
+                "kind": "manual_local",
+                "scope": "subscription",
+                "authoritative": False,
+            }
+            observed_at = preferences["quota_updated_at"]
+            automatic_reason = automatic_provider.get("reason")
+            reason = "Automatic source unavailable; showing manual local fallback."
+            if automatic_reason:
+                reason += f" {automatic_reason}"
+        else:
+            status = automatic_status
+            source = automatic_source
+            observed_at = automatic_provider.get("observed_at")
+            reason = automatic_provider.get("reason")
+
+        providers.append(
+            {
+                "id": provider_id,
+                "display_name": display_name,
+                "workload_zone_id": zone_id,
+                "status": status,
+                "source": source,
+                "observed_at": observed_at,
+                "stale_after_seconds": automatic_provider.get("stale_after_seconds"),
+                "windows": windows,
+                "reason": reason,
+                "refreshing": (
+                    bool(automatic.get("refreshing"))
+                    and provider_id in {"claude", "chatgpt"}
+                ),
+                "automatic_available": automatic_available,
+                "manual_fallback": manual_values_used,
+                "metadata": automatic_provider.get("metadata") or {},
+            }
+        )
+    return {
+        "schema_version": 2,
+        "generated_at": time.time(),
+        "refreshing": bool(automatic.get("refreshing")),
+        "collection_enabled": bool(automatic.get("enabled", True)),
+        "next_refresh_at": automatic.get("next_refresh_at"),
+        "refresh_cooldown_seconds": automatic.get("refresh_cooldown_seconds", 0),
+        "providers": providers,
     }
 
 
@@ -201,9 +333,18 @@ class MonitorState:
         self.services = ServiceCollector()
         self.network_attribution = NetworkAttributionCollector()
         self.containers = ContainerCollector()
+        stored_preferences = normalize_dashboard_preferences(
+            self.store.load_setting("dashboard_preferences", {})
+        )
+        self._dashboard_preferences = stored_preferences
+        self._dashboard_preferences_persisted = self.store.available
+        self.usage = UsageCollector(
+            enabled=stored_preferences["show_quota_cards"],
+        )
         self.extensions = scan_installed_extensions()
         self._lock = threading.Lock()
         self._runtime_lock = threading.Lock()
+        self._preferences_lock = threading.Lock()
         self._cached_json = ""
         self._cached_stream_json = ""
         self._cached_snapshot: dict | None = None
@@ -212,6 +353,7 @@ class MonitorState:
         self._observability_cached_at = 0.0
 
         self.sampler.snapshot()
+        self.usage.sample()
         time.sleep(min(0.5, self.refresh_s))
 
     @staticmethod
@@ -383,74 +525,33 @@ class MonitorState:
             return {"thresholds": values, "persisted": persisted}
 
     def dashboard_preferences(self) -> dict:
-        stored = self.store.load_setting("dashboard_preferences", {})
-        return {
-            "preferences": normalize_dashboard_preferences(stored),
-            "persisted": self.store.available,
-        }
+        with self._preferences_lock:
+            return {
+                "preferences": normalize_dashboard_preferences(
+                    self._dashboard_preferences
+                ),
+                "persisted": self._dashboard_preferences_persisted,
+            }
 
     def update_dashboard_preferences(self, updates: dict) -> dict:
-        current = self.dashboard_preferences()["preferences"]
-        candidate = normalize_dashboard_preferences({**current, **updates})
-        if candidate["provider_quotas"] != current["provider_quotas"]:
-            updates = {**updates, "quota_updated_at": time.time()}
-        preferences = normalize_dashboard_preferences({**current, **updates})
-        persisted = self.store.save_setting("dashboard_preferences", preferences)
+        with self._preferences_lock:
+            current = normalize_dashboard_preferences(self._dashboard_preferences)
+            candidate = normalize_dashboard_preferences({**current, **updates})
+            if candidate["provider_quotas"] != current["provider_quotas"]:
+                updates = {**updates, "quota_updated_at": time.time()}
+            preferences = normalize_dashboard_preferences({**current, **updates})
+            persisted = self.store.save_setting(
+                "dashboard_preferences",
+                preferences,
+            )
+            self._dashboard_preferences = preferences
+            self._dashboard_preferences_persisted = persisted
+            self.usage.set_enabled(preferences["show_quota_cards"])
         return {"preferences": preferences, "persisted": persisted}
 
-    def provider_usage(self) -> dict:
+    def provider_usage(self, force: bool = False) -> dict:
         preferences = self.dashboard_preferences()["preferences"]
-        quotas = preferences["provider_quotas"]
-        provider_meta = (
-            ("claude", "Claude", "claude"),
-            ("chatgpt", "ChatGPT", "codex"),
-            ("cursor", "Cursor", "cursor"),
-        )
-        providers = []
-        for provider_id, display_name, zone_id in provider_meta:
-            values = quotas[provider_id]
-            windows = []
-            for window_id, duration_minutes, key in (
-                ("five_hour", 300, "five_hour_used_percent"),
-                ("weekly", 10080, "weekly_used_percent"),
-            ):
-                used = values[key]
-                windows.append(
-                    {
-                        "id": window_id,
-                        "duration_minutes": duration_minutes,
-                        "used_percent": used,
-                        "remaining_percent": round(100.0 - used, 2) if used is not None else None,
-                        "resets_at": None,
-                    }
-                )
-            available = any(window["used_percent"] is not None for window in windows)
-            providers.append(
-                {
-                    "id": provider_id,
-                    "display_name": display_name,
-                    "workload_zone_id": zone_id,
-                    "status": "available" if available else "unsupported",
-                    "source": {
-                        "kind": "manual_local",
-                        "scope": "subscription",
-                        "authoritative": False,
-                    },
-                    "observed_at": preferences["quota_updated_at"] if available else None,
-                    "stale_after_seconds": None,
-                    "windows": windows,
-                    "reason": (
-                        None
-                        if available
-                        else "No safe programmatic quota source is configured; add local percentages in Settings."
-                    ),
-                }
-            )
-        return {
-            "schema_version": 1,
-            "generated_at": time.time(),
-            "providers": providers,
-        }
+        return merge_provider_usage(self.usage.sample(force=force), preferences)
 
     def history_snapshot(self, range_key: str) -> dict:
         return self.store.query_history(range_key)
@@ -518,7 +619,9 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             self._serve_json(self.monitor_server.state.dashboard_preferences())
             return
         if parsed.path == "/api/provider-usage":
-            self._serve_json(self.monitor_server.state.provider_usage())
+            query = parse_qs(parsed.query)
+            force = (query.get("refresh") or ["0"])[0].lower() in {"1", "true", "yes"}
+            self._serve_json(self.monitor_server.state.provider_usage(force=force))
             return
         if parsed.path == "/api/history":
             query = parse_qs(parsed.query)

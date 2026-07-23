@@ -58,7 +58,11 @@ Claude、ChatGPT 和 Cursor 的识别、项目归因与会话聚合全部保留�
 
 工作负载磁盘空间定义为“可归因项目目录的已分配大小”，而不是无法可靠归因到单个进程的整盘占用。后台线程每次只运行一个低优先级 `du` 探测，成功结果缓存 5 分钟，失败结果缓存 1 分钟；只测量当前用户主目录内的路径，超时或不可读时明确降级。
 
-Claude、ChatGPT 与 Cursor 各有独立额度卡。当前安全基线是用户在本机设置 5 小时和每周已用百分比；后端计算剩余百分比，但不读取凭证、Cookie 或非公开服务接口。未配置的窗口显示不可用，不以 0% 伪装真实额度。
+Claude、ChatGPT 与 Cursor 各有独立额度卡。ChatGPT 通过本机 `codex app-server` 的 `account/rateLimits/read` 读取当前活动 Codex profile；Claude 仅在用户明确把 `see-aicoding --capture-claude-usage` 配置为 Claude Code status-line 命令后，接收官方 status-line JSON 中的 `five_hour` / `seven_day` 字段。采集器只保存百分比、重置时间和采集时间，不读取或复制凭证、Cookie、session id；相同 status-line 值一分钟内不重复落盘。Cursor 没有假定非公开的个人接口，继续使用手动值或显示不可用。
+
+额度采集在独立守护线程中运行，不进入系统资源热循环：正常缓存 5 分钟，单次本地请求超时 8 秒，失败从 30 秒指数退避到最长 10 分钟，手动刷新具有 10 秒冷却。`/api/provider-usage` 始终立即返回当前安全缓存；自动值优先，手动值只填补自动数据缺失的窗口。未配置的窗口显示不可用，不以 0% 伪装真实额度。
+
+三个服务的额度采用紧凑卡片，每张卡以两个圆形进度环呈现 5 小时与每周窗口，环内显示已用百分比，旁边保留剩余额度、重置时间、来源与更新时间。AI Workloads 标题区提供即时显示/隐藏按钮，Settings 提供同一偏好的持久开关。隐藏额度卡时 UsageCollector 不再启动新的自动刷新线程；重新显示时恢复采集并立即读取安全缓存。UsageCollector 随 `see-aicoding --web` 启动，不需要额外守护进程或单独启动命令。
 
 ### 7. Compact Dashboard 与偏好设置
 
@@ -97,6 +101,7 @@ all normalized data ──> snapshot schema v3 ──> compact cached SSE + full
 selected PID ──────> on-demand detail endpoint
 confirmed action ──> guarded same-user process action endpoint
 runtime adapters ──> launchd/systemd · nettop/sockets · Docker/Podman endpoints
+local provider IPC ─> usage.UsageCollector ─────────> cached provider-usage endpoint
 ```
 
 关键调整：
@@ -105,6 +110,7 @@ runtime adapters ──> launchd/systemd · nettop/sockets · Docker/Podman endp
 - `telemetry.py` 是系统遥测边界，封装短期历史、吞吐/IOPS/延迟、传感器和 GPU 平台适配器；`storage.py` 独立处理慢速 SMART 探测。
 - `observability.py` 只负责阈值状态机；`persistence.py` 负责 SQLite schema、保留策略和历史降采样，两者不依赖浏览器。
 - `runtime.py` 封装服务、网络与容器命令适配器，全部具有超时、缓存和明确降级状态。
+- `usage.py` 封装 Codex app-server、显式 Claude status-line 快照、缓存、超时与失败退避；采集线程与系统遥测线程解耦，Cursor 没有安全来源时保持明确不可用。
 - `snapshot.py` 提供 schema v3，同时保留旧版 `cpu_percent` 和 `disk` 别名，降低现有客户端迁移成本。
 - `web.py` 在刷新窗口内缓存快照，避免每个 SSE 客户端重复进行一次全系统采样；SSE 使用精简 JSON，完整进程信息独立按需读取；同时对白名单化 Dashboard 偏好进行规范化，并通过 SQLite settings 持久化语言、主题、刷新策略、区块顺序、可见性、密度、额度和表格字段。
 - `web_static` 只消费规范化 JSON，不包含平台判断或系统命令；资源图表引用统一 CSS 语义色，不重复定义颜色常量；视口观察器控制重区块渲染和后台轮询。

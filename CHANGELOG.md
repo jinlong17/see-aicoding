@@ -9,7 +9,17 @@
 - Standardized user-facing Codex/OpenAI workload labels as ChatGPT while
   retaining stable internal detector identifiers.
 - Added per-provider quota cards for Claude, ChatGPT, and Cursor. Values are
-  optional local percentages and remain explicitly unavailable until configured.
+  populated automatically from the active local Codex profile and explicitly
+  enabled Claude status-line data, with manual values filling missing windows.
+  Cursor remains manual or unavailable because no supported personal source is
+  assumed.
+- Reworked quota cards into compact 5-hour and weekly circular gauges, with
+  direct and Settings-based visibility controls. Hiding them pauses future
+  automatic quota refreshes; showing them resumes collection.
+- Added a local-only quota collector with a 5-minute cache, 8-second provider
+  timeout, bounded exponential failure retry, manual refresh cooldown, and a
+  sanitized user-only Claude snapshot that never stores session or credential
+  fields. Identical Claude values are write-deduplicated for one minute.
 - Added staggered, cached project allocation measurements to AI workload,
   project, and session cards without running `du` on the hot sampling path.
 - Added best-effort CPU temperature reporting with explicit unsupported states.

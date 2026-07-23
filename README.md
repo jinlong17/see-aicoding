@@ -86,7 +86,7 @@ When a machine feels slow, the responsible workload is often hidden behind helpe
 | Container runtime | Docker/Podman inventory and one-shot CPU, memory, network, block I/O, port, and PID metrics |
 | Guarded process actions | Suspend, resume, or terminate current-user processes with protected PID and same-origin checks |
 | Compact Dashboard | Dense single-page Web layout with English/Chinese switching, five themes, movable sections, optional cards, configurable process columns, and SQLite-backed preferences |
-| AI quota cards | Separate Claude, ChatGPT, and Cursor cards with truthful unavailable states and optional local 5-hour/weekly usage percentages |
+| AI quota cards | Automatic local ChatGPT/Codex and explicitly enabled Claude quota updates, with manual fallback and truthful Cursor unavailable states |
 | Workload storage | Staggered, cached project-directory allocation for each attributed AI workload |
 | CPU temperature | Best-effort CPU package temperature with explicit platform/provider availability |
 | Stable semantic colors | Dedicated colors for resources, I/O directions, runtime domains, alert states, and each AI provider |
@@ -150,6 +150,7 @@ see-aicoding --all            # include idle sessions
 see-aicoding --no-tree        # one row per session
 see-aicoding --once           # print one snapshot and exit
 see-aicoding --full-screen    # alternate-screen mode
+see-aicoding --capture-claude-usage  # Claude status-line capture command
 see-aicoding --version        # print the installed version
 ```
 
@@ -165,6 +166,7 @@ see-aicoding --version        # print the installed version
 | `--open` | off | Open the web monitor in the default browser; only applies with `--web` |
 | `--host HOST` | `127.0.0.1` | Web monitor host; localhost addresses only |
 | `--port PORT` | `8765` | Web monitor port |
+| `--capture-claude-usage` | off | Read one Claude status-line payload from stdin, persist only sanitized quota fields, print a compact status line, and exit |
 
 ## Web Monitor
 
@@ -188,6 +190,54 @@ The color system is intentionally semantic: CPU, GPU, memory, storage, network,
 processes, disk I/O, services, containers, and alert states each have a
 dedicated token. Claude, ChatGPT, and Cursor keep stable identity colors across
 their cards, trends, projects, sessions, and child-process rows.
+
+### Automatic AI quota updates
+
+Quota collection runs independently from the resource sampling loop. Results
+are cached for 5 minutes; failures use bounded exponential retry from 30 seconds
+to 10 minutes, each local provider request times out after 8 seconds, and the
+Refresh quotas action has a 10-second cooldown. The dashboard API always returns
+the current safe cache immediately, so quota collection cannot delay CPU,
+memory, GPU, disk, or process snapshots. A transient refresh failure preserves
+the last successful values with an explicit stale state.
+
+The compact quota cards use two circular gauges per service for the 5-hour and
+weekly windows. Use **Hide quotas / Show quotas** in AI Workloads, or the
+persistent quota switch in Settings. Hiding the cards also pauses future
+automatic collection; showing them resumes the collector and requests a fresh
+cached result. No separate quota daemon or startup command is required:
+`see-aicoding --web` owns the lightweight collector.
+
+- **ChatGPT:** the dashboard starts the installed local `codex app-server` and
+  reads `account/rateLimits/read` for the currently active Codex profile. It
+  does not inspect or copy credentials, cookies, or account files.
+- **Claude:** Claude Code must be explicitly configured to send its official
+  status-line JSON to the capture command below. The capture file contains only
+  `five_hour` / `seven_day` usage percentages, reset timestamps, and capture
+  time; it is written atomically with user-only permissions. Identical
+  status-line values are written at most once per minute to limit disk churn.
+- **Cursor:** no supported personal quota source is assumed. Cursor remains
+  unavailable unless manual percentages are entered in Settings; no browser
+  scraping, cookie access, or private API is used.
+
+To enable Claude automatic updates, make sure `see-aicoding` is on the PATH seen
+by Claude Code, then add this explicit status-line command to
+`~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "see-aicoding --capture-claude-usage"
+  }
+}
+```
+
+Claude supplies rate-limit fields only for eligible Claude.ai subscription
+sessions and may omit them until the first assistant response. A missing field
+does not erase the last good local snapshot. Automatic values take precedence;
+Settings values fill only quota windows that the automatic source did not
+return.
 
 See [the resource dashboard architecture](https://github.com/jinlong17/see-aicoding/blob/main/docs/RESOURCE_DASHBOARD_ARCHITECTURE.md)
 for the research basis, module boundaries, GPU availability contract, and
@@ -216,6 +266,8 @@ With the Web monitor running, verify the live API and saved dashboard preference
 ```bash
 curl --fail --silent http://127.0.0.1:8765/api/snapshot | python3 -m json.tool | head -40
 curl --fail --silent http://127.0.0.1:8765/api/dashboard-preferences | python3 -m json.tool
+curl --fail --silent http://127.0.0.1:8765/api/provider-usage | python3 -m json.tool
+curl --fail --silent 'http://127.0.0.1:8765/api/provider-usage?refresh=1' | python3 -m json.tool
 ```
 
 If `which see-aicoding` points to a wrapper script, inspect the first few lines
@@ -279,6 +331,7 @@ src/see_aicoding/
 ├── persistence.py     # SQLite samples, events, settings, and range queries
 ├── storage.py         # diskutil/smartctl health adapters
 ├── runtime.py         # services, per-process network, Docker/Podman adapters
+├── usage.py           # cached local provider quotas and Claude status-line capture
 ├── web.py             # local ThreadingHTTPServer + SSE endpoints
 ├── web_static/        # compact browser UI, semantic color tokens, and interactions
 ├── cursor_ext.py      # Cursor / VS Code AI extension scanner
@@ -297,6 +350,7 @@ Sampling flow:
 7. Threshold transitions and resource samples are written to SQLite with a bounded retention policy.
 8. `build_snapshot()` normalizes schema v3 for `/api/snapshot` and cached `/events` delivery.
 9. Services, long history, process network attribution, containers, and selected process details use separate on-demand endpoints.
+10. Provider quotas refresh on an independent cached worker and merge with manual values outside the resource snapshot path.
 
 ## Notes
 
