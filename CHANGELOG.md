@@ -20,6 +20,10 @@
   timeout, bounded exponential failure retry, manual refresh cooldown, and a
   sanitized user-only Claude snapshot that never stores session or credential
   fields. Identical Claude values are write-deduplicated for one minute.
+- Automatically prefer and validate app-bundled Codex binaries before PATH
+  candidates, fall back when an older CLI lacks the required app-server
+  protocol, and distinguish a configured Claude capture that is merely waiting
+  for its first eligible response.
 - Added staggered, cached project allocation measurements to AI workload,
   project, and session cards without running `du` on the hot sampling path.
 - Added best-effort CPU temperature reporting with explicit unsupported states.

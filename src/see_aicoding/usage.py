@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import queue
+import shlex
 import shutil
 import subprocess
 import threading
@@ -154,23 +155,43 @@ def normalize_codex_rate_limits(result: object, observed_at: float | None = None
     )
 
 
-def find_codex_executable() -> str | None:
-    override = os.environ.get("SEE_AICODING_CODEX_BIN")
-    if override:
-        path = Path(override).expanduser()
-        return str(path) if path.is_file() and os.access(path, os.X_OK) else None
-    command = shutil.which("codex")
-    if command:
-        return command
-    for bundled in (
+def _bundled_codex_paths() -> tuple[Path, ...]:
+    return (
         Path("/Applications/ChatGPT.app/Contents/Resources/codex"),
         Path("/Applications/Codex.app/Contents/Resources/codex"),
         Path.home() / "Applications" / "ChatGPT.app" / "Contents" / "Resources" / "codex",
         Path.home() / "Applications" / "Codex.app" / "Contents" / "Resources" / "codex",
-    ):
-        if bundled.is_file() and os.access(bundled, os.X_OK):
-            return str(bundled)
-    return None
+    )
+
+
+def _is_executable_file(path: str | Path) -> bool:
+    candidate = Path(path).expanduser()
+    return candidate.is_file() and os.access(candidate, os.X_OK)
+
+
+def find_codex_executables() -> list[str]:
+    """Return local Codex candidates in safest automatic-selection order."""
+    override = os.environ.get("SEE_AICODING_CODEX_BIN")
+    if override:
+        path = Path(override).expanduser()
+        return [str(path)] if _is_executable_file(path) else []
+
+    candidates: list[str] = []
+    # App-bundled Codex versions move with their supported app-server protocol,
+    # so prefer them over an arbitrary older CLI found first on PATH.
+    for bundled in _bundled_codex_paths():
+        if _is_executable_file(bundled):
+            candidates.append(str(bundled))
+    command = shutil.which("codex")
+    if command and _is_executable_file(command):
+        candidates.append(command)
+    return list(dict.fromkeys(candidates))
+
+
+def find_codex_executable() -> str | None:
+    """Return the preferred candidate for callers that only need one path."""
+    candidates = find_codex_executables()
+    return candidates[0] if candidates else None
 
 
 def _put_stdout_lines(stream: Any, target: queue.Queue[object]) -> None:
@@ -221,16 +242,9 @@ class CodexRateLimitSource:
 
     def __init__(self, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> None:
         self.timeout_seconds = max(1.0, float(timeout_seconds))
+        self._selected_executable: str | None = None
 
-    def collect(self) -> dict[str, object]:
-        executable = find_codex_executable()
-        if executable is None:
-            return _provider_result(
-                "chatgpt",
-                "unavailable",
-                reason="Codex is not installed or SEE_AICODING_CODEX_BIN is invalid.",
-            )
-
+    def _collect_from_executable(self, executable: str) -> dict[str, object]:
         process: subprocess.Popen[str] | None = None
         messages: queue.Queue[object] = queue.Queue()
         try:
@@ -287,12 +301,97 @@ class CodexRateLimitSource:
                         process.kill()
                         process.wait(timeout=1.0)
 
+    def collect(self) -> dict[str, object]:
+        candidates = find_codex_executables()
+        if self._selected_executable and _is_executable_file(self._selected_executable):
+            candidates = [
+                self._selected_executable,
+                *(
+                    candidate
+                    for candidate in candidates
+                    if candidate != self._selected_executable
+                ),
+            ]
+        if not candidates:
+            return _provider_result(
+                "chatgpt",
+                "unavailable",
+                reason="No executable Codex app-server candidate was found.",
+            )
+
+        errors: list[str] = []
+        for executable in candidates:
+            try:
+                result = self._collect_from_executable(executable)
+            except UsageSourceError as exc:
+                errors.append(str(exc))
+                continue
+            self._selected_executable = executable
+            metadata = result.get("metadata")
+            metadata = dict(metadata) if isinstance(metadata, dict) else {}
+            metadata.update(
+                {
+                    "codex_executable": executable,
+                    "selection": (
+                        "environment_override"
+                        if os.environ.get("SEE_AICODING_CODEX_BIN")
+                        else "automatic"
+                    ),
+                }
+            )
+            result["metadata"] = metadata
+            return result
+
+        last_error = errors[-1] if errors else "The app-server protocol was unavailable."
+        raise UsageSourceError(
+            "No compatible local Codex app-server was found after "
+            f"{len(candidates)} attempt(s). Last error: {last_error}"
+        )
+
 
 def default_claude_usage_path() -> Path:
     override = os.environ.get("SEE_AICODING_CLAUDE_USAGE_FILE")
     if override:
         return Path(override).expanduser()
     return default_database_path().parent / "claude-usage.json"
+
+
+def default_claude_settings_path() -> Path:
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir).expanduser() / "settings.json"
+    return Path.home() / ".claude" / "settings.json"
+
+
+def claude_statusline_configuration(path: str | Path | None = None) -> dict[str, object]:
+    """Inspect whether Claude Code is configured to invoke the safe capture mode."""
+    settings_path = (
+        Path(path).expanduser()
+        if path is not None
+        else default_claude_settings_path()
+    )
+    try:
+        if settings_path.stat().st_size > 1024 * 1024:
+            return {"configured": False, "settings_path": str(settings_path)}
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {"configured": False, "settings_path": str(settings_path)}
+    status_line = payload.get("statusLine") if isinstance(payload, dict) else None
+    if not isinstance(status_line, dict) or status_line.get("type") != "command":
+        return {"configured": False, "settings_path": str(settings_path)}
+    command = status_line.get("command")
+    if not isinstance(command, str):
+        return {"configured": False, "settings_path": str(settings_path)}
+    try:
+        arguments = shlex.split(command)
+    except ValueError:
+        arguments = []
+    configured = "--capture-claude-usage" in arguments[1:]
+    return {
+        "configured": configured,
+        "settings_path": str(settings_path),
+        "uses_absolute_executable": bool(arguments and Path(arguments[0]).is_absolute()),
+    }
 
 
 def _normalize_claude_window(
@@ -317,19 +416,43 @@ def _normalize_claude_window(
 class ClaudeStatusLineSource:
     """Read a sanitized snapshot explicitly written by Claude Code status-line."""
 
-    def __init__(self, path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        settings_path: str | Path | None = None,
+    ) -> None:
         self.path = Path(path).expanduser() if path is not None else default_claude_usage_path()
+        self.settings_path = (
+            Path(settings_path).expanduser()
+            if settings_path is not None
+            else default_claude_settings_path()
+        )
 
     def collect(self) -> dict[str, object]:
         if not self.path.is_file():
+            configuration = claude_statusline_configuration(self.settings_path)
+            configured = bool(configuration["configured"])
             return _provider_result(
                 "claude",
                 "unavailable",
                 reason=(
-                    "Claude automatic quota capture is not configured. "
-                    "Set Claude Code statusLine.command to "
-                    "'see-aicoding --capture-claude-usage'."
+                    "Claude quota capture is configured and starts automatically "
+                    "in a new Claude Code session after the first eligible response."
+                    if configured
+                    else (
+                        "Claude automatic quota capture is not configured. "
+                        "Set Claude Code statusLine.command to an absolute "
+                        "see-aicoding path with '--capture-claude-usage'."
+                    )
                 ),
+                metadata={
+                    "capture_configured": configured,
+                    "waiting_for_first_response": configured,
+                    "uses_absolute_executable": configuration.get(
+                        "uses_absolute_executable",
+                        False,
+                    ),
+                },
             )
         try:
             if self.path.stat().st_size > 64 * 1024:

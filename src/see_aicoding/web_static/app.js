@@ -1587,6 +1587,9 @@ function quotaSourceLabel(kind) {
 function quotaProviderStatus(provider) {
   const hasValues = (provider.windows || []).some((windowModel) => windowModel.used_percent !== null && windowModel.used_percent !== undefined);
   if (provider.refreshing && !hasValues) return quotaLocale("Refreshing", "刷新中");
+  if (provider.id === "claude" && provider.metadata?.capture_configured && !hasValues) {
+    return quotaLocale("Waiting", "等待回复");
+  }
   if (provider.status === "stale") return quotaLocale("Stale", "数据已过期");
   if (provider.automatic_available) return quotaLocale("Automatic", "自动更新");
   if (provider.manual_fallback || hasValues) return quotaLocale("Manual fallback", "手动后备");
@@ -1602,6 +1605,12 @@ function quotaProviderNote(provider) {
   }
   if (provider.manual_fallback) return quotaLocale("Manual local fallback", "本地手动后备");
   if (provider.id === "claude") {
+    if (provider.metadata?.capture_configured) {
+      return quotaLocale(
+        "Configured · waiting for a new Claude response",
+        "已配置 · 等待新 Claude 会话首次回复",
+      );
+    }
     return quotaLocale(
       "Configure: see-aicoding --capture-claude-usage",
       "请配置：see-aicoding --capture-claude-usage",

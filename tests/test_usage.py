@@ -9,14 +9,94 @@ from pathlib import Path
 from unittest import mock
 
 from see_aicoding.usage import (
+    CodexRateLimitSource,
     ClaudeStatusLineSource,
+    UsageSourceError,
     UsageCollector,
     capture_claude_statusline,
+    claude_statusline_configuration,
+    find_codex_executables,
     normalize_codex_rate_limits,
 )
 
 
 class UsageSourceTests(unittest.TestCase):
+    def test_codex_candidates_prefer_bundled_app_before_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundled = root / "ChatGPT-codex"
+            path_cli = root / "path-codex"
+            for executable in (bundled, path_cli):
+                executable.write_text("#!/bin/sh\n", encoding="utf-8")
+                executable.chmod(0o700)
+
+            with (
+                mock.patch(
+                    "see_aicoding.usage._bundled_codex_paths",
+                    return_value=(bundled,),
+                ),
+                mock.patch(
+                    "see_aicoding.usage.shutil.which",
+                    return_value=str(path_cli),
+                ),
+                mock.patch.dict(os.environ, {}, clear=False),
+            ):
+                os.environ.pop("SEE_AICODING_CODEX_BIN", None)
+                result = find_codex_executables()
+
+            self.assertEqual(result, [str(bundled), str(path_cli)])
+
+    def test_codex_source_falls_back_and_caches_compatible_candidate(self) -> None:
+        source = CodexRateLimitSource()
+        available = normalize_codex_rate_limits(
+            {
+                "rateLimits": {
+                    "primary": {
+                        "usedPercent": 53,
+                        "windowDurationMins": 10080,
+                    }
+                }
+            },
+            observed_at=1234,
+        )
+        with (
+            mock.patch(
+                "see_aicoding.usage.find_codex_executables",
+                return_value=["/old/codex", "/Applications/ChatGPT.app/codex"],
+            ),
+            mock.patch(
+                "see_aicoding.usage._is_executable_file",
+                return_value=True,
+            ),
+            mock.patch.object(
+                source,
+                "_collect_from_executable",
+                side_effect=[UsageSourceError("unsupported --stdio"), available],
+            ) as collect,
+        ):
+            result = source.collect()
+            fallback_calls = list(collect.call_args_list)
+            collect.reset_mock(side_effect=True)
+            collect.side_effect = [available]
+            cached_result = source.collect()
+
+        self.assertEqual(fallback_calls[0].args, ("/old/codex",))
+        self.assertEqual(
+            fallback_calls[1].args,
+            ("/Applications/ChatGPT.app/codex",),
+        )
+        self.assertEqual(cached_result["status"], "available")
+        self.assertEqual(collect.call_count, 1)
+        self.assertEqual(
+            collect.call_args.args,
+            ("/Applications/ChatGPT.app/codex",),
+        )
+        self.assertEqual(
+            result["metadata"]["codex_executable"],
+            "/Applications/ChatGPT.app/codex",
+        )
+        self.assertEqual(result["metadata"]["selection"], "automatic")
+
     def test_codex_rate_limits_prefer_primary_codex_bucket(self) -> None:
         result = normalize_codex_rate_limits(
             {
@@ -167,6 +247,37 @@ class UsageSourceTests(unittest.TestCase):
                 [(window["id"], window["used_percent"]) for window in result["windows"]],
                 [("five_hour", 20.0), ("weekly", 30.0)],
             )
+
+    def test_missing_claude_snapshot_reports_configured_waiting_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = root / "settings.json"
+            settings.write_text(
+                json.dumps(
+                    {
+                        "statusLine": {
+                            "type": "command",
+                            "command": (
+                                "/opt/anaconda3/bin/see-aicoding "
+                                "--capture-claude-usage"
+                            ),
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            configuration = claude_statusline_configuration(settings)
+            result = ClaudeStatusLineSource(
+                root / "missing-usage.json",
+                settings,
+            ).collect()
+
+            self.assertTrue(configuration["configured"])
+            self.assertTrue(configuration["uses_absolute_executable"])
+            self.assertTrue(result["metadata"]["capture_configured"])
+            self.assertTrue(result["metadata"]["waiting_for_first_response"])
+            self.assertIn("starts automatically", result["reason"])
 
     def test_usage_collector_refreshes_off_thread_and_reuses_cache(self) -> None:
         release = mock.Mock()

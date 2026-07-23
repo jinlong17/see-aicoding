@@ -107,6 +107,7 @@ class DashboardPaletteTests(unittest.TestCase):
         self.assertIn("state.quotaFetchFailures += 1", javascript)
         self.assertIn("next_refresh_at: Date.now() / 1000 + retrySeconds", javascript)
         self.assertIn('aria-valuetext="${quotaLocale("Unavailable", "不可用")}"', javascript)
+        self.assertIn('return quotaLocale("Waiting", "等待回复")', javascript)
 
 
 if __name__ == "__main__":

@@ -208,9 +208,13 @@ automatic collection; showing them resumes the collector and requests a fresh
 cached result. No separate quota daemon or startup command is required:
 `see-aicoding --web` owns the lightweight collector.
 
-- **ChatGPT:** the dashboard starts the installed local `codex app-server` and
-  reads `account/rateLimits/read` for the currently active Codex profile. It
-  does not inspect or copy credentials, cookies, or account files.
+- **ChatGPT:** the dashboard automatically prefers the Codex binary bundled
+  with ChatGPT.app/Codex.app, validates the app-server protocol by making the
+  real local request, and falls back across compatible local candidates. This
+  avoids an older NVM/global CLI shadowing the supported app binary. An
+  explicit `SEE_AICODING_CODEX_BIN` remains available as an override. The
+  collector reads `account/rateLimits/read` for the currently active Codex
+  profile and does not inspect or copy credentials, cookies, or account files.
 - **Claude:** Claude Code must be explicitly configured to send its official
   status-line JSON to the capture command below. The capture file contains only
   `five_hour` / `seven_day` usage percentages, reset timestamps, and capture
@@ -220,24 +224,25 @@ cached result. No separate quota daemon or startup command is required:
   unavailable unless manual percentages are entered in Settings; no browser
   scraping, cookie access, or private API is used.
 
-To enable Claude automatic updates, make sure `see-aicoding` is on the PATH seen
-by Claude Code, then add this explicit status-line command to
-`~/.claude/settings.json`:
+To enable Claude automatic updates, add this explicit status-line command to
+`~/.claude/settings.json`. Prefer the absolute installed path so Claude Code
+does not depend on its inherited PATH:
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "see-aicoding --capture-claude-usage"
+    "command": "/opt/anaconda3/bin/see-aicoding --capture-claude-usage"
   }
 }
 ```
 
 Claude supplies rate-limit fields only for eligible Claude.ai subscription
-sessions and may omit them until the first assistant response. A missing field
-does not erase the last good local snapshot. Automatic values take precedence;
-Settings values fill only quota windows that the automatic source did not
-return.
+sessions and may omit them until the first assistant response. The dashboard
+detects an existing status-line configuration and reports that it is waiting,
+rather than incorrectly claiming it is unconfigured. A missing field does not
+erase the last good local snapshot. Automatic values take precedence; Settings
+values fill only quota windows that the automatic source did not return.
 
 See [the resource dashboard architecture](https://github.com/jinlong17/see-aicoding/blob/main/docs/RESOURCE_DASHBOARD_ARCHITECTURE.md)
 for the research basis, module boundaries, GPU availability contract, and
