@@ -21,19 +21,18 @@ from .monitor import (
     ZONE_CURSOR,
     ZONE_META,
     History,
-    count_remote_conns,
     fmt_duration,
     sparkline,
 )
-from .render import build_resource_groups, group_cpu_capacity, resource_group_detail
+from .render import build_resource_groups, resource_group_detail
 
 
 IDLE_CPU_THRESHOLD = 0.5
+LOGICAL_CPU_COUNT = psutil.cpu_count() or 1
 
 
 def _cpu_capacity(cpu_percent: float) -> float:
-    logical_cpus = psutil.cpu_count() or 1
-    return cpu_percent / logical_cpus
+    return cpu_percent / LOGICAL_CPU_COUNT
 
 
 def _system_name() -> str:
@@ -172,21 +171,29 @@ def _process_tree_metadata(procs: list[ProcSample]) -> dict[str, Any]:
     }
 
 
-def _project_to_dict(project: ProjectSummary) -> dict[str, Any]:
+def _project_to_dict(
+    project: ProjectSummary,
+    disk_by_path: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    disk = (disk_by_path or {}).get(project.path or "") or {}
     return {
         "name": project.name,
+        "path": project.path,
         "cpu_percent": project.cpu,
         "cpu_capacity_percent": _cpu_capacity(project.cpu),
         "memory_bytes": project.rss,
         "process_count": project.proc_count,
         "latest_create_time": project.latest_create_time,
+        "disk_usage_bytes": disk.get("allocated_bytes"),
+        "disk_usage_status": disk.get("status", "unavailable"),
+        "disk_usage_sampled_at": disk.get("sampled_at"),
     }
 
 
 def _session_status(session: Session) -> str:
     if session.total_cpu >= 70:
         return "HOT"
-    if session.total_cpu >= 10 or count_remote_conns(session.root.pid) > 0:
+    if session.total_cpu >= 10:
         return "LIVE"
     if session.total_cpu >= 1:
         return "WARM"
@@ -196,10 +203,25 @@ def _session_status(session: Session) -> str:
 def _session_to_dict(
     session: Session,
     gpu_by_pid: dict[int, dict[str, Any]] | None = None,
+    disk_by_path: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     gpu_by_pid = gpu_by_pid or {}
     label, color = KIND_META.get(session.kind, (session.kind, "#A1ACB8"))
     active = session.total_cpu >= IDLE_CPU_THRESHOLD
+    project_paths = {project.path for project in session.project_stats if project.path}
+    disk_values = [
+        (disk_by_path or {}).get(path or "") or {}
+        for path in project_paths
+    ]
+    disk_usage_values = [
+        int(item["allocated_bytes"])
+        for item in disk_values
+        if item.get("allocated_bytes") is not None
+    ]
+    disk_pending = sum(
+        item.get("status") in {"pending", "measuring"} for item in disk_values
+    )
+    disk_unavailable = sum(item.get("status") == "unavailable" for item in disk_values)
     return {
         "id": session.session_id,
         "kind": session.kind,
@@ -208,7 +230,10 @@ def _session_to_dict(
         "zone": session.zone,
         "project": session.project,
         "projects": list(session.projects),
-        "project_stats": [_project_to_dict(project) for project in session.project_stats],
+        "project_stats": [
+            _project_to_dict(project, disk_by_path=disk_by_path)
+            for project in session.project_stats
+        ],
         "root": _proc_to_dict(session.root, gpu_process=gpu_by_pid.get(session.root.pid)),
         "children": [
             _proc_to_dict(
@@ -221,6 +246,18 @@ def _session_to_dict(
         "cpu_percent": session.total_cpu,
         "cpu_capacity_percent": _cpu_capacity(session.total_cpu),
         "memory_bytes": session.total_rss,
+        "disk_usage_bytes": sum(disk_usage_values) if disk_usage_values else None,
+        "disk_usage_status": (
+            "partial"
+            if disk_usage_values and (disk_pending or disk_unavailable)
+            else "available"
+            if disk_usage_values and len(disk_usage_values) == len(project_paths)
+            else "measuring"
+            if disk_pending
+            else "unavailable"
+        ),
+        "disk_usage_available_count": len(disk_usage_values),
+        "disk_usage_project_count": len(project_paths),
         "process_count": session.proc_count,
         "uptime_seconds": session.uptime,
         "uptime_label": fmt_duration(session.uptime),
@@ -234,6 +271,7 @@ def _zone_to_dict(
     sessions: list[Session],
     history: History,
     gpu_by_pid: dict[int, dict[str, Any]] | None = None,
+    disk_by_path: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     title, color, marker = ZONE_META[zone_id]
     zone_sessions = [session for session in sessions if session.zone == zone_id]
@@ -244,12 +282,32 @@ def _zone_to_dict(
     project_map: dict[str, ProjectSummary] = {}
     for session in active_sessions:
         for project in session.project_stats:
-            existing = project_map.setdefault(project.name, ProjectSummary(name=project.name))
+            project_key = project.path or project.name
+            existing = project_map.setdefault(
+                project_key,
+                ProjectSummary(name=project.name, path=project.path),
+            )
             existing.cpu += project.cpu
             existing.rss += project.rss
             existing.proc_count += project.proc_count
             existing.latest_create_time = max(existing.latest_create_time, project.latest_create_time)
+            if existing.path is None and project.path:
+                existing.path = project.path
     projects = sorted(project_map.values(), key=lambda p: (-p.latest_create_time, p.name))
+    project_paths = {project.path for project in projects if project.path}
+    disk_values = [
+        (disk_by_path or {}).get(path or "") or {}
+        for path in project_paths
+    ]
+    disk_usage_values = [
+        int(item["allocated_bytes"])
+        for item in disk_values
+        if item.get("allocated_bytes") is not None
+    ]
+    disk_pending = sum(
+        item.get("status") in {"pending", "measuring"} for item in disk_values
+    )
+    disk_unavailable = sum(item.get("status") == "unavailable" for item in disk_values)
     zone_history = list(history.zone_cpu.get(zone_id, []))
     return {
         "id": zone_id,
@@ -262,11 +320,31 @@ def _zone_to_dict(
         "cpu_percent": cpu_total,
         "cpu_capacity_percent": _cpu_capacity(cpu_total),
         "memory_bytes": memory_total,
-        "projects": [_project_to_dict(project) for project in projects],
+        "projects": [
+            _project_to_dict(project, disk_by_path=disk_by_path)
+            for project in projects
+        ],
+        "disk_usage_bytes": sum(disk_usage_values) if disk_usage_values else None,
+        "disk_usage_status": (
+            "partial"
+            if disk_usage_values and (disk_pending or disk_unavailable)
+            else "available"
+            if disk_usage_values and len(disk_usage_values) == len(project_paths)
+            else "measuring"
+            if disk_pending
+            else "unavailable"
+        ),
+        "disk_usage_available_count": len(disk_usage_values),
+        "disk_usage_project_count": len(project_paths),
+        "disk_usage_pending_count": disk_pending,
         "history": zone_history,
         "sparkline": sparkline(zone_history, scale_max=max([50.0, *zone_history])) if zone_history else "",
         "sessions": [
-            _session_to_dict(session, gpu_by_pid=gpu_by_pid)
+            _session_to_dict(
+                session,
+                gpu_by_pid=gpu_by_pid,
+                disk_by_path=disk_by_path,
+            )
             for session in zone_sessions
         ],
     }
@@ -288,6 +366,7 @@ def _extension_to_dict(ext: ExtensionInfo) -> dict[str, Any]:
 def _resource_item(
     proc: ProcSample,
     gpu_by_pid: dict[int, dict[str, Any]] | None = None,
+    system_memory_total: int = 0,
 ) -> dict[str, Any]:
     gpu_by_pid = gpu_by_pid or {}
     data = _proc_to_dict(
@@ -296,12 +375,8 @@ def _resource_item(
         gpu_process=gpu_by_pid.get(proc.pid),
     )
     data["memory_percent_of_system"] = 0.0
-    try:
-        total = psutil.virtual_memory().total
-    except (OSError, RuntimeError):
-        total = 0
-    if total:
-        data["memory_percent_of_system"] = proc.rss / total * 100.0
+    if system_memory_total:
+        data["memory_percent_of_system"] = proc.rss / system_memory_total * 100.0
     return data
 
 
@@ -309,6 +384,7 @@ def _resource_group_to_dict(
     group,
     gpu_by_pid: dict[int, dict[str, Any]] | None = None,
     include_members: bool = True,
+    system_memory_total: int = 0,
 ) -> dict[str, Any]:
     gpu_by_pid = gpu_by_pid or {}
     members = sorted(group.procs, key=lambda p: (-p.rss, -p.cpu_percent, p.pid))
@@ -329,7 +405,7 @@ def _resource_group_to_dict(
         "process_count": group.proc_count,
         "pids": [proc.pid for proc in members],
         "cpu_percent": group.cpu_percent,
-        "cpu_capacity_percent": group_cpu_capacity(group),
+        "cpu_capacity_percent": group.cpu_percent / LOGICAL_CPU_COUNT,
         "memory_bytes": group.rss,
         "read_bytes_per_s": sum(proc.read_bytes_per_s for proc in group.procs),
         "write_bytes_per_s": sum(proc.write_bytes_per_s for proc in group.procs),
@@ -338,18 +414,20 @@ def _resource_group_to_dict(
         "usernames": sorted({proc.username for proc in group.procs if proc.username}),
         "members": (
             [
-                _resource_item(proc, gpu_by_pid=gpu_by_pid)
+                _resource_item(
+                    proc,
+                    gpu_by_pid=gpu_by_pid,
+                    system_memory_total=system_memory_total,
+                )
                 for proc in members[:4]
             ]
             if include_members
             else []
         ),
     }
-    try:
-        total = psutil.virtual_memory().total
-    except (OSError, RuntimeError):
-        total = 0
-    data["memory_percent_of_system"] = group.rss / total * 100.0 if total else 0.0
+    data["memory_percent_of_system"] = (
+        group.rss / system_memory_total * 100.0 if system_memory_total else 0.0
+    )
     return data
 
 
@@ -361,6 +439,7 @@ def build_snapshot(
     refresh_s: float,
     system_metrics: dict[str, Any] | None = None,
     observability: dict[str, Any] | None = None,
+    workload_storage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a browser-friendly snapshot from monitor samples."""
     now = time.time()
@@ -378,16 +457,25 @@ def build_snapshot(
         for item in gpu.get("processes", [])
         if item.get("pid") is not None
     }
+    disk_by_path = {
+        str(item["path"]): item
+        for item in (workload_storage or {}).get("items", [])
+        if item.get("path")
+    }
     program_items = [
         _resource_group_to_dict(
             group,
             gpu_by_pid=gpu_by_pid,
             include_members=False,
+            system_memory_total=vm.total,
         )
         for group in resource_groups
     ]
     top_memory = sorted(resource_groups, key=lambda g: (-g.rss, -g.cpu_percent, g.label))[:5]
-    top_cpu = sorted(resource_groups, key=lambda g: (-group_cpu_capacity(g), -g.rss, g.label))[:5]
+    top_cpu = sorted(
+        resource_groups,
+        key=lambda g: (-(g.cpu_percent / LOGICAL_CPU_COUNT), -g.rss, g.label),
+    )[:5]
     top_disk = sorted(
         program_items,
         key=lambda item: (
@@ -482,14 +570,42 @@ def build_snapshot(
             "history": total_history,
             "memory_history_mb": list(history.total_mem),
             "sparkline": sparkline(total_history, scale_max=max([100.0, *total_history])) if total_history else "",
+            "workload_storage": workload_storage or {
+                "provider": "none",
+                "cache_seconds": 0,
+                "items": [],
+                "pending_count": 0,
+            },
         },
         "zones": [
-            _zone_to_dict(ZONE_CLAUDE, sessions, history, gpu_by_pid=gpu_by_pid),
-            _zone_to_dict(ZONE_CODEX, sessions, history, gpu_by_pid=gpu_by_pid),
-            _zone_to_dict(ZONE_CURSOR, sessions, history, gpu_by_pid=gpu_by_pid),
+            _zone_to_dict(
+                ZONE_CLAUDE,
+                sessions,
+                history,
+                gpu_by_pid=gpu_by_pid,
+                disk_by_path=disk_by_path,
+            ),
+            _zone_to_dict(
+                ZONE_CODEX,
+                sessions,
+                history,
+                gpu_by_pid=gpu_by_pid,
+                disk_by_path=disk_by_path,
+            ),
+            _zone_to_dict(
+                ZONE_CURSOR,
+                sessions,
+                history,
+                gpu_by_pid=gpu_by_pid,
+                disk_by_path=disk_by_path,
+            ),
         ],
         "sessions": [
-            _session_to_dict(session, gpu_by_pid=gpu_by_pid)
+            _session_to_dict(
+                session,
+                gpu_by_pid=gpu_by_pid,
+                disk_by_path=disk_by_path,
+            )
             for session in sessions
         ],
         "processes": {
@@ -513,11 +629,19 @@ def build_snapshot(
                 key=lambda item: (-item["cpu_capacity_percent"], -item["memory_bytes"], item["label"]),
             ),
             "top_memory": [
-                _resource_group_to_dict(group, gpu_by_pid=gpu_by_pid)
+                _resource_group_to_dict(
+                    group,
+                    gpu_by_pid=gpu_by_pid,
+                    system_memory_total=vm.total,
+                )
                 for group in top_memory
             ],
             "top_cpu": [
-                _resource_group_to_dict(group, gpu_by_pid=gpu_by_pid)
+                _resource_group_to_dict(
+                    group,
+                    gpu_by_pid=gpu_by_pid,
+                    system_memory_total=vm.total,
+                )
                 for group in top_cpu
             ],
             "top_disk": top_disk,

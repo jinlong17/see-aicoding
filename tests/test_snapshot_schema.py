@@ -1,6 +1,12 @@
 import unittest
 
-from see_aicoding.monitor import History, ProcSample
+from see_aicoding.monitor import (
+    KIND_CODEX_CLI,
+    History,
+    ProcSample,
+    ProjectSummary,
+    Session,
+)
 from see_aicoding.snapshot import build_snapshot
 
 
@@ -81,6 +87,78 @@ class SystemSnapshotSchemaTests(unittest.TestCase):
         self.assertEqual(snapshot["resources"]["programs"][0]["process_count"], 1)
         self.assertEqual(snapshot["resources"]["programs"][0]["read_bytes_per_s"], 1024)
         self.assertIn("observability", snapshot)
+
+    def test_workload_disk_fields_are_exposed_at_all_ai_levels(self):
+        project_path = "/tmp/example-project"
+        proc = ProcSample(
+            pid=4321,
+            ppid=1,
+            name="codex",
+            exe="/usr/local/bin/codex",
+            cmdline_str="codex",
+            create_time=1,
+            cwd=project_path,
+            cpu_percent=8,
+            rss=64 * 1024**2,
+            kind=KIND_CODEX_CLI,
+        )
+        project = ProjectSummary(
+            name="example-project",
+            path=project_path,
+            cpu=8,
+            rss=64 * 1024**2,
+            proc_count=1,
+            latest_create_time=1,
+        )
+        session = Session(
+            session_id="codex_cli:4321",
+            kind=KIND_CODEX_CLI,
+            root=proc,
+            project=project.name,
+            projects=[project.name],
+            project_stats=[project],
+        )
+        workload_storage = {
+            "provider": "du",
+            "cache_seconds": 300,
+            "pending_count": 0,
+            "items": [
+                {
+                    "path": project_path,
+                    "name": project.name,
+                    "allocated_bytes": 12_345_678,
+                    "status": "available",
+                    "sampled_at": 1234.5,
+                    "note": "test measurement",
+                }
+            ],
+        }
+
+        snapshot = build_snapshot(
+            sessions=[session],
+            procs={proc.pid: proc},
+            history=History(),
+            extensions=[],
+            refresh_s=2.0,
+            workload_storage=workload_storage,
+        )
+
+        self.assertEqual(snapshot["ai"]["workload_storage"], workload_storage)
+        session_item = snapshot["sessions"][0]
+        self.assertEqual(session_item["disk_usage_bytes"], 12_345_678)
+        self.assertEqual(session_item["disk_usage_status"], "available")
+        self.assertEqual(session_item["disk_usage_available_count"], 1)
+        self.assertEqual(session_item["disk_usage_project_count"], 1)
+        project_item = session_item["project_stats"][0]
+        self.assertEqual(project_item["path"], project_path)
+        self.assertEqual(project_item["disk_usage_bytes"], 12_345_678)
+        self.assertEqual(project_item["disk_usage_status"], "available")
+        self.assertEqual(project_item["disk_usage_sampled_at"], 1234.5)
+        chatgpt_zone = next(zone for zone in snapshot["zones"] if zone["id"] == "codex")
+        self.assertEqual(chatgpt_zone["disk_usage_bytes"], 12_345_678)
+        self.assertEqual(chatgpt_zone["disk_usage_status"], "available")
+        self.assertEqual(chatgpt_zone["disk_usage_available_count"], 1)
+        self.assertEqual(chatgpt_zone["disk_usage_project_count"], 1)
 
 
 if __name__ == "__main__":

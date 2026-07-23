@@ -16,8 +16,8 @@ from pathlib import Path
 # Family used for visual grouping: claude / openai / copilot / cline / continue / cody / other
 KNOWN_AI_EXTENSIONS: dict[str, tuple[str, str, str]] = {
     "anthropic.claude-code": ("Claude Code", "claude", "#B48CFF"),
-    "openai.chatgpt": ("OpenAI ChatGPT", "openai", "#30D5A8"),
-    "openai.codex": ("OpenAI Codex", "openai", "#30D5A8"),
+    "openai.chatgpt": ("ChatGPT", "openai", "#30D5A8"),
+    "openai.codex": ("ChatGPT Codex", "openai", "#30D5A8"),
     "github.copilot": ("GitHub Copilot", "copilot", "#8FB4FF"),
     "github.copilot-chat": ("Copilot Chat", "copilot", "#8FB4FF"),
     "saoudrizwan.claude-dev": ("Cline (Claude Dev)", "cline", "#D6B6FF"),

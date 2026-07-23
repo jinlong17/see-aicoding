@@ -19,7 +19,7 @@ from .render import render_all
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="see-aicoding",
-        description="Local system resource monitor with focused Claude, Codex, and Cursor workload context.",
+        description="Local system resource monitor with focused Claude, ChatGPT, and Cursor workload context.",
     )
     p.add_argument("-i", "--interval", type=float, default=1.5,
                    help="Refresh interval in seconds (default 1.5).")

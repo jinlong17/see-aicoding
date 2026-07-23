@@ -2,7 +2,7 @@
 
 Layout:
     ┌─ AI Coding Monitor (header w/ progress bars) ─┐
-    ├─ Claude ─┬─ Codex/OpenAI ─┬─ Cursor IDE ─────┤
+    ├─ Claude ─┬─ ChatGPT ──────┬─ Cursor IDE ─────┤
     │ sessions │ sessions        │ sessions + exts │
     └──────────┴─────────────────┴─────────────────┘
 """
@@ -70,7 +70,7 @@ PROJECT_PALETTE = (
 MAX_CHILD_ROWS = 12
 MAX_PROJECT_CHILD_ROWS = 5
 IDLE_CPU_THRESHOLD = 0.5
-CHROME_TAB_STATS_TTL_S = 5.0
+CHROME_TAB_STATS_TTL_S = 60.0
 CHROME_TAB_STATS_TIMEOUT_S = 1.0
 CHROME_ACCESSIBILITY_STATS_TIMEOUT_S = 2.0
 _chrome_tab_stats_cache: tuple[float, str | None] = (0.0, None)

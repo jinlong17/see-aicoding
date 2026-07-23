@@ -9,6 +9,180 @@ const SECTION_LABELS = {
   storage: "Storage",
   runtime: "Runtime",
 };
+const PERFORMANCE_INTERVALS = { realtime: 1.5, balanced: 3, efficient: 5 };
+const ZH_TEXT = {
+  "System monitor": "系统监视器",
+  "Local system monitor": "本地系统监视器",
+  "Skip to dashboard": "跳到看板",
+  "Monitor controls": "监控控制",
+  "System summary": "系统摘要",
+  "uptime": "运行时间",
+  "processes": "进程",
+  "load": "负载",
+  "Connecting": "正在连接",
+  "Pause": "暂停",
+  "Resume": "继续",
+  "Settings": "设置",
+  "Dashboard settings": "看板设置",
+  "Reset": "重置",
+  "Language and appearance": "语言与外观",
+  "Language": "语言",
+  "Theme": "主题",
+  "Refresh": "刷新频率",
+  "Light": "浅色",
+  "Warm yellow": "浅黄色",
+  "Soft green": "浅绿色",
+  "Dark": "暗色",
+  "Deep": "深色",
+  "Real-time · 1.5s": "实时 · 1.5 秒",
+  "Balanced · 3s": "平衡 · 3 秒",
+  "Efficient · 5s": "节能 · 5 秒",
+  "Density": "密度",
+  "Compact": "紧凑",
+  "Comfortable": "舒适",
+  "Visible sections": "可见区块",
+  "Top resource users": "资源占用排行",
+  "Activity and alerts": "活动与告警",
+  "Programs and processes": "程序与进程",
+  "Storage": "存储",
+  "Runtime": "运行环境",
+  "Coding sessions": "编码会话",
+  "Section order": "区块顺序",
+  "CPU, GPU, and the other resource cards stay pinned at the top.": "CPU、GPU 和其他资源卡片固定在顶部。",
+  "Process columns": "进程列",
+  "User": "用户",
+  "State": "状态",
+  "Memory": "内存",
+  "Network": "网络",
+  "Threads": "线程",
+  "Age": "时长",
+  "AI service quotas": "AI 服务额度",
+  "Optional local percentages. No credentials or private provider APIs are read.": "可选的本地百分比；不会读取凭证或非公开服务接口。",
+  "5h used %": "5 小时已用 %",
+  "Weekly used %": "每周已用 %",
+  "Reading": "读取中",
+  "Detecting": "检测中",
+  "Live": "实时",
+  "Local": "本地",
+  "Waiting for processor data": "等待处理器数据",
+  "Waiting for GPU telemetry": "等待 GPU 数据",
+  "Waiting for memory data": "等待内存数据",
+  "Waiting for local volumes": "等待本地磁盘",
+  "Waiting for interface activity": "等待网络活动",
+  "Waiting for process inventory": "等待进程清单",
+  "System overview": "系统概览",
+  "Resource trend": "资源趋势",
+  "System activity": "系统活动",
+  "Trend range": "趋势范围",
+  "Disk read": "磁盘读取",
+  "Disk write": "磁盘写入",
+  "Download": "下载",
+  "Upload": "上传",
+  "Building live history...": "正在建立实时历史…",
+  "System status": "系统状态",
+  "Alerts and events": "告警与事件",
+  "No active resource alerts": "没有活动资源告警",
+  "Recent transitions": "最近状态变化",
+  "Waiting for a resource state change": "等待资源状态变化",
+  "Policy": "策略",
+  "Alert thresholds": "告警阈值",
+  "Edit thresholds": "编辑阈值",
+  "Warning must remain below critical. Recovery uses a hysteresis band to reduce flapping.": "警告值必须低于严重值；恢复采用滞回区间以减少反复波动。",
+  "Save thresholds": "保存阈值",
+  "Pressure map": "压力分布",
+  "Grouped applications; select a row to inspect the primary process.": "按应用分组；选择一行可查看主进程。",
+  "Machine capacity": "整机容量",
+  "Resident memory": "常驻内存",
+  "Attributed utilization": "归因利用率",
+  "Live inventory": "实时清单",
+  "Reading the system process list...": "正在读取系统进程清单…",
+  "collected": "已采集",
+  "running": "运行中",
+  "Inventory mode": "清单模式",
+  "Programs": "程序",
+  "Processes": "进程",
+  "Tree": "进程树",
+  "All users": "所有用户",
+  "Current user": "当前用户",
+  "All states": "所有状态",
+  "Running": "运行中",
+  "Sleeping": "休眠",
+  "Stopped": "已停止",
+  "Building process inventory...": "正在建立进程清单…",
+  "Show more": "显示更多",
+  "Local storage": "本地存储",
+  "Capacity, health, and I/O": "容量、健康与 I/O",
+  "Latency": "延迟",
+  "Throughput": "吞吐量",
+  "Disk activity": "磁盘活动",
+  "Read": "读取",
+  "Write": "写入",
+  "Detecting available sensors": "正在检测可用传感器",
+  "Device health": "设备健康",
+  "Reading device health...": "正在读取设备健康信息…",
+  "Device I/O": "设备 I/O",
+  "IOPS and latency": "IOPS 与延迟",
+  "Waiting for disk activity...": "等待磁盘活动…",
+  "System runtime": "系统运行环境",
+  "Network, services, and containers": "网络、服务与容器",
+  "services": "服务",
+  "Network attribution": "网络归因",
+  "Per-process network": "按进程网络",
+  "System services": "系统服务",
+  "Containers": "容器",
+  "Container runtime": "容器运行时",
+  "Refresh": "刷新",
+  "AI workloads": "AI 工作负载",
+  "Agent activity remains available as system workload context.": "智能助手活动作为系统工作负载上下文展示。",
+  "Show idle providers": "显示空闲服务",
+  "AI service quotas": "AI 服务额度",
+  "Process inspector": "进程检查器",
+  "Process details": "进程详情",
+  "Reading process details...": "正在读取进程详情…",
+  "Normal": "正常",
+  "Elevated": "偏高",
+  "High": "高",
+  "Unavailable": "不可用",
+  "Paused": "已暂停",
+  "Offline": "离线",
+  "Reconnecting": "正在重连",
+  "Data error": "数据错误",
+  "Active projects": "活跃项目",
+  "No active sessions": "没有活跃会话",
+  "Not configured": "未配置",
+  "Manual local values": "本地手动数据",
+  "Used": "已用",
+  "Remaining": "剩余",
+  "Weekly": "每周",
+  "5 hours": "5 小时",
+  "Disk": "磁盘",
+  "Disk --": "磁盘 --",
+  "Projects": "项目",
+  "CPU activity": "CPU 活动",
+  "Now": "当前",
+  "Peak": "峰值",
+  "No child processes": "没有子进程",
+  "Child processes": "子进程",
+  "Show": "显示",
+  "Hide": "隐藏",
+  "Measuring": "测量中",
+  "Partial": "部分数据",
+  "Temp --": "温度 --",
+  "CPU temperature unavailable": "CPU 温度不可用",
+  "active sessions": "活跃会话",
+  "memory": "内存",
+  "CPU utilization": "CPU 利用率",
+  "GPU utilization": "GPU 利用率",
+  "Memory utilization": "内存利用率",
+  "Storage utilization": "存储利用率",
+  "Network activity": "网络活动",
+  "Running processes": "运行中进程",
+  "macOS does not expose CPU temperature to unprivileged psutil; configure a compatible unprivileged temperature helper to enable this reading.": "macOS 未向无特权 psutil 暴露 CPU 温度；配置兼容的无特权温度辅助程序后可启用。",
+  "No safe programmatic quota source is configured; add local percentages in Settings.": "尚未配置安全的程序化额度数据源；可在设置中填写本地百分比。",
+  "Quota data unavailable": "额度数据不可用",
+};
+const originalText = new WeakMap();
+const originalAttributes = new WeakMap();
 
 const state = {
   snapshot: null,
@@ -32,24 +206,42 @@ const state = {
   services: null,
   serviceQuery: "",
   networkAttribution: null,
+  networkByPid: new Map(),
   runtimeTimer: null,
   containers: null,
   containerTimer: null,
+  processTimer: null,
   expandedAiSessions: new Set(),
+  providerUsage: null,
+  pendingSnapshot: null,
+  renderFrame: null,
+  runtimeVisible: false,
+  networkRequestInFlight: false,
+  containerRequestInFlight: false,
   preferences: {
     density: "compact",
+    language: "en",
+    theme: "deep",
+    performance_mode: "balanced",
     hidden_sections: [],
     show_idle_ai: false,
     section_order: [...SECTION_ORDER_DEFAULT],
     process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
+    provider_quotas: {
+      claude: { five_hour_used_percent: null, weekly_used_percent: null },
+      chatgpt: { five_hour_used_percent: null, weekly_used_percent: null },
+      cursor: { five_hour_used_percent: null, weekly_used_percent: null },
+    },
+    quota_updated_at: null,
   },
   preferenceTimer: null,
+  searchTimer: null,
 };
 
 const el = Object.fromEntries(
   [
     "connectionState", "pauseBtn", "hostLine", "factUptime", "factProcesses", "factLoad",
-    "cpuState", "cpuValue", "cpuDetail", "cpuChart", "cpuMeter",
+    "cpuState", "cpuTemperature", "cpuValue", "cpuDetail", "cpuChart", "cpuMeter",
     "gpuState", "gpuValue", "gpuDetail", "gpuChart", "gpuMeter",
     "memoryState", "memoryValue", "memoryDetail", "memoryChart", "memoryMeter",
     "storageState", "storageValue", "storageDetail", "storageChart", "storageMeter",
@@ -71,7 +263,7 @@ const el = Object.fromEntries(
     "containerProvider", "containerSummary", "containerNote", "refreshContainers",
     "containerGrid", "containerPanel", "thirdLeaderCard", "thirdLeaderGlyph",
     "thirdLeaderTitle", "thirdLeaderNote", "showIdleAiToggle", "customizeMenu",
-    "resetPreferences", "sectionOrderList",
+    "resetPreferences", "sectionOrderList", "languageSelect", "themeSelect", "performanceMode", "quotaGrid",
     "drawerScrim", "detailsTitle", "detailsBody", "closeDetails", "toast",
   ].map((id) => [id, document.getElementById(id)])
 );
@@ -86,6 +278,85 @@ const COLORS = {
   read: "var(--io-read)",
   write: "var(--io-write)",
 };
+
+function currentLocale() {
+  return state.preferences.language === "zh-CN" ? "zh-CN" : "en-US";
+}
+
+function localized(english, chinese) {
+  return state.preferences.language === "zh-CN" ? chinese : english;
+}
+
+function translateText(value) {
+  if (state.preferences.language !== "zh-CN") return value;
+  const source = String(value ?? "");
+  const match = source.match(/^(\s*)(.*?)(\s*)$/s);
+  const leading = match?.[1] || "";
+  const text = match?.[2] || source;
+  const trailing = match?.[3] || "";
+  if (ZH_TEXT[text]) return `${leading}${ZH_TEXT[text]}${trailing}`;
+  let translated = text
+    .replace(/(\d[\d,]*) active sessions?/g, "$1 个活跃会话")
+    .replace(/(\d[\d,]*) related processes?/g, "$1 个相关进程")
+    .replace(/(\d[\d,]*) live/g, "$1 个实时会话")
+    .replace(/(\d[\d,]*) projects?/g, "$1 个项目")
+    .replace(/(\d[\d,]*) processes?/g, "$1 个进程")
+    .replace(/(\d[\d,]*) running services?/g, "$1 个运行中服务")
+    .replace(/(\d[\d,]*) network processes?/g, "$1 个网络进程")
+    .replace(/(\d[\d,]*) running containers?/g, "$1 个运行中容器")
+    .replace(/Showing ([\d,]+) of ([\d,]+)/g, "显示 $1 / $2")
+    .replace(/^IDLE(?=\s*·)/, "空闲")
+    .replace(/^LIVE(?=\s*·)/, "实时")
+    .replace(/^WARM(?=\s*·)/, "活跃")
+    .replace(/([\d,]+) more processes/g, "另外 $1 个进程")
+    .replace(/ disk$/g, " 磁盘")
+    .replace(/([\d.]+\s*(?:B|KB|MB|GB|TB|PB)) memory/g, "$1 内存")
+    .replace(/([\d,]+) active$/g, "$1 个活动项")
+    .replace(/([\d,]+) critical$/g, "$1 个严重告警")
+    .replace(/([\d,]+) warning$/g, "$1 个警告");
+  return `${leading}${translated}${trailing}`;
+}
+
+function localizeDom(root = document.body) {
+  if (!root) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach((node) => {
+    const parent = node.parentElement;
+    if (!parent || ["SCRIPT", "STYLE"].includes(parent.tagName)) return;
+    const previous = originalText.get(node);
+    const source = previous && node.nodeValue === previous.rendered
+      ? previous.source
+      : node.nodeValue || "";
+    const rendered = translateText(source);
+    originalText.set(node, { source, rendered });
+    node.nodeValue = rendered;
+  });
+  const elements = root.nodeType === Node.ELEMENT_NODE ? [root, ...root.querySelectorAll("*")] : [...root.querySelectorAll("*")];
+  elements.forEach((node) => {
+    const saved = originalAttributes.get(node) || {};
+    ["aria-label", "placeholder", "title"].forEach((attribute) => {
+      if (!node.hasAttribute(attribute)) return;
+      const current = node.getAttribute(attribute) || "";
+      const previous = saved[attribute];
+      const source = previous && current === previous.rendered ? previous.source : current;
+      const rendered = translateText(source);
+      saved[attribute] = { source, rendered };
+      node.setAttribute(attribute, rendered);
+    });
+    originalAttributes.set(node, saved);
+  });
+  document.documentElement.lang = state.preferences.language;
+  document.title = state.preferences.language === "zh-CN"
+    ? "see-aicoding · 系统监视器"
+    : "see-aicoding · System monitor";
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = state.preferences.theme;
+  try { localStorage.setItem("see-aicoding-theme", state.preferences.theme); } catch {}
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -121,7 +392,7 @@ function formatPct(value, digits = 1) {
 }
 
 function formatNumber(value) {
-  return new Intl.NumberFormat("en-US").format(Number(value || 0));
+  return new Intl.NumberFormat(currentLocale()).format(Number(value || 0));
 }
 
 function formatDuration(seconds) {
@@ -131,6 +402,12 @@ function formatDuration(seconds) {
   const hours = Math.floor(remaining / 3600);
   remaining %= 3600;
   const minutes = Math.floor(remaining / 60);
+  if (state.preferences.language === "zh-CN") {
+    if (days) return `${days}天 ${hours}小时`;
+    if (hours) return `${hours}小时 ${minutes}分`;
+    if (minutes) return `${minutes}分 ${remaining % 60}秒`;
+    return `${remaining}秒`;
+  }
   if (days) return `${days}d ${hours}h`;
   if (hours) return `${hours}h ${minutes}m`;
   if (minutes) return `${minutes}m ${remaining % 60}s`;
@@ -140,7 +417,7 @@ function formatDuration(seconds) {
 function formatEventTime(timestamp) {
   const date = new Date(Number(timestamp || 0) * 1000);
   if (Number.isNaN(date.getTime())) return "--";
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(currentLocale(), {
     month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
   }).format(date);
 }
@@ -282,29 +559,12 @@ function setView(view) {
   });
   if (state.snapshot) renderCurrentView();
   if (view === "events") fetchHistory(state.historyRange);
-  if (view === "runtime" && !state.services) fetchServices();
   if (view === "runtime") {
-    if (!state.containers) fetchContainers();
-    fetchNetwork(Boolean(state.networkAttribution));
-    if (!state.runtimeTimer) {
-      state.runtimeTimer = window.setInterval(() => {
-        if (state.view === "runtime" && !state.paused) fetchNetwork(true);
-      }, 4000);
-    }
-    if (!state.containerTimer) {
-      state.containerTimer = window.setInterval(() => {
-        if (state.view === "runtime" && !state.paused) fetchContainers(true);
-      }, 8000);
-    }
+    state.runtimeVisible = true;
+    startRuntimePolling();
   } else {
-    if (state.runtimeTimer) {
-      window.clearInterval(state.runtimeTimer);
-      state.runtimeTimer = null;
-    }
-    if (state.containerTimer) {
-      window.clearInterval(state.containerTimer);
-      state.containerTimer = null;
-    }
+    state.runtimeVisible = false;
+    stopRuntimePolling();
   }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -333,7 +593,17 @@ function renderOverview(snapshot) {
   el.factLoad.textContent = Number(cpu.load_1 || 0).toFixed(2);
 
   el.cpuValue.textContent = cpuValue.toFixed(0);
-  el.cpuDetail.textContent = `${system.physical_cpus || "--"} physical · ${system.logical_cpus || "--"} logical${cpu.frequency_mhz ? ` · ${(cpu.frequency_mhz / 1000).toFixed(2)}GHz` : ""}`;
+  el.cpuDetail.textContent = state.preferences.language === "zh-CN"
+    ? `${system.physical_cpus || "--"} 个物理核心 · ${system.logical_cpus || "--"} 个逻辑核心${cpu.frequency_mhz ? ` · ${(cpu.frequency_mhz / 1000).toFixed(2)}GHz` : ""}`
+    : `${system.physical_cpus || "--"} physical · ${system.logical_cpus || "--"} logical${cpu.frequency_mhz ? ` · ${(cpu.frequency_mhz / 1000).toFixed(2)}GHz` : ""}`;
+  const cpuTemperature = cpu.temperature || {};
+  el.cpuTemperature.textContent = cpuTemperature.available
+    ? `${Number(cpuTemperature.temperature_c).toFixed(1)}°C`
+    : "Temp N/A";
+  el.cpuTemperature.title = cpuTemperature.note || "CPU temperature unavailable";
+  el.cpuTemperature.classList.toggle("is-good", Boolean(cpuTemperature.available && Number(cpuTemperature.temperature_c) < 80));
+  el.cpuTemperature.classList.toggle("is-medium", Boolean(cpuTemperature.available && Number(cpuTemperature.temperature_c) >= 80 && Number(cpuTemperature.temperature_c) < 95));
+  el.cpuTemperature.classList.toggle("is-high", Boolean(cpuTemperature.available && Number(cpuTemperature.temperature_c) >= 95));
   setMetricState(el.cpuState, cpuValue);
   setMeter(el.cpuMeter, cpuValue);
   setGauge(el.cpuChart, cpuValue);
@@ -341,7 +611,7 @@ function renderOverview(snapshot) {
   el.gpuValue.textContent = gpuAvailable ? gpuValue.toFixed(0) : "--";
   const gpuDevice = gpu.devices?.[0];
   el.gpuDetail.textContent = gpuAvailable
-    ? `${gpuDevice?.name || "GPU"} · ${gpu.provider || "provider"}${gpu.memory_used_bytes !== null && gpu.memory_used_bytes !== undefined ? ` · ${formatBytes(gpu.memory_used_bytes)} used` : ""}`
+    ? `${gpuDevice?.name || "GPU"} · ${gpu.provider || "provider"}${gpu.memory_used_bytes !== null && gpu.memory_used_bytes !== undefined ? ` · ${formatBytes(gpu.memory_used_bytes)} ${localized("used", "已用")}` : ""}`
     : gpu.note || "No supported GPU telemetry provider";
   setMetricState(el.gpuState, gpuValue, gpuAvailable);
   setMeter(el.gpuMeter, gpuValue);
@@ -350,14 +620,14 @@ function renderOverview(snapshot) {
   el.gpuLegend.hidden = !gpuAvailable;
 
   el.memoryValue.textContent = memoryValue.toFixed(0);
-  el.memoryDetail.textContent = `${formatBytes(memory.used_bytes)} used · ${formatBytes(memory.available_bytes)} free${swap.total_bytes ? ` · swap ${formatPct(swap.percent, 0)}` : ""}`;
+  el.memoryDetail.textContent = `${formatBytes(memory.used_bytes)} ${localized("used", "已用")} · ${formatBytes(memory.available_bytes)} ${localized("free", "可用")}${swap.total_bytes ? ` · ${localized("swap", "交换空间")} ${formatPct(swap.percent, 0)}` : ""}`;
   setMetricState(el.memoryState, memoryValue);
   setMeter(el.memoryMeter, memoryValue);
   setGauge(el.memoryChart, memoryValue);
 
   el.storageValue.textContent = disks.length ? diskValue.toFixed(0) : "--";
   el.storageDetail.textContent = disks.length
-    ? `${formatBytes(systemDisk.used_bytes)} used · ${formatBytes(systemDisk.free_bytes)} free · ${systemDisk.mountpoint || "Local"}`
+    ? `${formatBytes(systemDisk.used_bytes)} ${localized("used", "已用")} · ${formatBytes(systemDisk.free_bytes)} ${localized("free", "可用")} · ${systemDisk.mountpoint || localized("Local", "本地")}`
     : "No readable local mount point";
   setMetricState(el.storageState, diskValue, Boolean(disks.length));
   setMeter(el.storageMeter, diskValue);
@@ -372,7 +642,7 @@ function renderOverview(snapshot) {
   const networkPeak = Math.max(combinedNetwork, ...networkHistory, 1);
   const networkGauge = combinedNetwork / networkPeak * 100;
   el.networkValue.textContent = formatRate(combinedNetwork);
-  el.networkDetail.textContent = `Down ${formatRate(downloadRate)} · Up ${formatRate(uploadRate)}`;
+  el.networkDetail.textContent = `${localized("Down", "下行")} ${formatRate(downloadRate)} · ${localized("Up", "上行")} ${formatRate(uploadRate)}`;
   setMeter(el.networkMeter, networkGauge);
   setGauge(el.networkChart, networkGauge, "I/O");
 
@@ -380,9 +650,9 @@ function renderOverview(snapshot) {
   const processRunning = Number(processSummary.running || 0);
   const runningShare = processTotal ? processRunning / processTotal * 100 : 0;
   el.processValue.textContent = formatNumber(processTotal);
-  el.processDetail.textContent = `${formatNumber(processRunning)} running · ${formatNumber(processSummary.threads || 0)} threads`;
+  el.processDetail.textContent = `${formatNumber(processRunning)} ${localized("running", "运行中")} · ${formatNumber(processSummary.threads || 0)} ${localized("threads", "线程")}`;
   setMeter(el.processMeter, runningShare);
-  setGauge(el.processChart, runningShare, `${formatNumber(processRunning)} run`);
+  setGauge(el.processChart, runningShare, `${formatNumber(processRunning)} ${localized("run", "运行")}`);
 
   if (state.historyRange === "live") {
     const liveSeries = [
@@ -392,14 +662,14 @@ function renderOverview(snapshot) {
     if (gpuAvailable) liveSeries.push({ values: history.gpu_percent || [], color: COLORS.gpu, fill: false });
     el.resourceTrendChart.classList.remove("skeleton-block");
     el.resourceTrendChart.innerHTML = renderChart(liveSeries, { scaleMax: 100, height: 64, grid: true });
-    el.persistenceFacts.innerHTML = `<span><b>${formatNumber(history.cpu_percent?.length || 0)}</b> in-memory samples</span><span><b>${Number(snapshot.refresh_interval || 0).toFixed(1)}s</b> refresh</span><span><b>Live</b> current session</span>`;
+    el.persistenceFacts.innerHTML = `<span><b>${formatNumber(history.cpu_percent?.length || 0)}</b> ${localized("in-memory samples", "个内存样本")}</span><span><b>${Number(snapshot.refresh_interval || 0).toFixed(1)}s</b> ${localized("refresh", "刷新")}</span><span><b>${localized("Live", "实时")}</b> ${localized("current session", "当前会话")}</span>`;
   }
 
   el.diskReadRate.textContent = formatRate(diskIo.read_bytes_per_s || 0);
   el.diskWriteRate.textContent = formatRate(diskIo.write_bytes_per_s || 0);
   el.networkDownRate.textContent = formatRate(network.download_bytes_per_s || 0);
   el.networkUpRate.textContent = formatRate(network.upload_bytes_per_s || 0);
-  el.updateTime.textContent = new Date((snapshot.generated_at || 0) * 1000).toLocaleTimeString("en-US", { hour12: false });
+  el.updateTime.textContent = new Date((snapshot.generated_at || 0) * 1000).toLocaleTimeString(currentLocale(), { hour12: false });
 
   const resources = snapshot.resources || {};
   el.topCpu.innerHTML = renderLeaders(resources.top_cpu || [], "cpu");
@@ -565,8 +835,7 @@ function usageCell(value, label, color = COLORS.cpu) {
 }
 
 function networkForPids(pids) {
-  const wanted = new Set((pids || []).map(Number));
-  const matched = (state.networkAttribution?.items || []).filter((item) => wanted.has(Number(item.pid)));
+  const matched = (pids || []).map((pid) => state.networkByPid.get(Number(pid))).filter(Boolean);
   const down = matched.reduce((sum, item) => sum + Number(item.received_bytes_per_s || 0), 0);
   const up = matched.reduce((sum, item) => sum + Number(item.sent_bytes_per_s || 0), 0);
   return { down, up, total: down + up, connections: matched.reduce((sum, item) => sum + Number(item.connection_count || 0), 0) };
@@ -847,12 +1116,13 @@ function renderNetworkAttribution(model) {
       <td title="${escapeHtml(endpoints.join(", "))}"><span class="endpoint-list">${escapeHtml(endpoints.slice(0, 2).join(" · ") || "--")}</span></td>
     </tr>`;
   }).join("") : `<tr><td colspan="6"><div class="empty-state">${escapeHtml(model?.note || "No readable per-process network activity")}</div></td></tr>`;
-  el.networkVisibleCount.textContent = `Showing ${formatNumber(items.length)} of ${formatNumber(model?.items?.length || 0)}${throughput ? " · rates refresh every 4 seconds" : " · throughput attribution unavailable"}`;
+  el.networkVisibleCount.textContent = `Showing ${formatNumber(items.length)} of ${formatNumber(model?.items?.length || 0)}${throughput ? " · rates refresh every 10 seconds" : " · throughput attribution unavailable"}`;
   renderRuntimeSummary();
   if (state.snapshot) {
     renderThirdLeader(state.snapshot.resources || {}, state.snapshot.system?.gpu || {});
-    renderProcesses(state.snapshot);
+    if (state.preferences.process_columns.includes("network") && sectionNearViewport("processes")) renderProcesses(state.snapshot);
   }
+  if (state.preferences.language === "zh-CN") localizeDom(document.querySelector("[data-dashboard-section='runtime']"));
 }
 
 function renderRuntime() {
@@ -878,22 +1148,29 @@ async function fetchServices(force = false) {
 }
 
 async function fetchNetwork(force = false) {
+  if (state.networkRequestInFlight) return;
+  state.networkRequestInFlight = true;
   el.refreshNetwork.disabled = true;
   try {
     const response = await fetch(`/api/network-attribution${force ? "?refresh=1" : ""}`, { cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     state.networkAttribution = payload;
+    state.networkByPid = new Map((payload.items || []).map((item) => [Number(item.pid), item]));
     renderNetworkAttribution(payload);
   } catch (error) {
     state.networkAttribution = { available: false, throughput_available: false, items: [], summary: {}, note: error.message || "Failed to read network attribution" };
+    state.networkByPid = new Map();
     renderNetworkAttribution(state.networkAttribution);
   } finally {
     el.refreshNetwork.disabled = false;
+    state.networkRequestInFlight = false;
   }
 }
 
 async function fetchContainers(force = false) {
+  if (state.containerRequestInFlight) return;
+  state.containerRequestInFlight = true;
   el.refreshContainers.disabled = true;
   try {
     const response = await fetch(`/api/containers${force ? "?refresh=1" : ""}`, { cache: "no-store" });
@@ -906,6 +1183,7 @@ async function fetchContainers(force = false) {
     renderContainers(state.containers);
   } finally {
     el.refreshContainers.disabled = false;
+    state.containerRequestInFlight = false;
   }
 }
 
@@ -1072,10 +1350,18 @@ async function saveThresholds() {
 function normalizePreferences(value = {}) {
   const defaults = {
     density: "compact",
+    language: "en",
+    theme: "deep",
+    performance_mode: "balanced",
     hidden_sections: [],
     show_idle_ai: false,
     section_order: SECTION_ORDER_DEFAULT,
     process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
+    provider_quotas: {
+      claude: { five_hour_used_percent: null, weekly_used_percent: null },
+      chatgpt: { five_hour_used_percent: null, weekly_used_percent: null },
+      cursor: { five_hour_used_percent: null, weekly_used_percent: null },
+    },
   };
   const density = value.density === "comfortable" ? "comfortable" : "compact";
   const hidden = Array.isArray(value.hidden_sections) ? value.hidden_sections.filter((item) => ["leaders", "processes", "storage", "runtime", "coding"].includes(item)) : [];
@@ -1085,12 +1371,30 @@ function normalizePreferences(value = {}) {
   SECTION_ORDER_DEFAULT.forEach((item) => {
     if (!sectionOrder.includes(item)) sectionOrder.push(item);
   });
+  const percent = (raw) => {
+    if (raw === null || raw === undefined || raw === "") return null;
+    const number = Number(raw);
+    return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : null;
+  };
+  const providerQuotas = {};
+  ["claude", "chatgpt", "cursor"].forEach((provider) => {
+    const raw = value.provider_quotas?.[provider] || {};
+    providerQuotas[provider] = {
+      five_hour_used_percent: percent(raw.five_hour_used_percent),
+      weekly_used_percent: percent(raw.weekly_used_percent),
+    };
+  });
   return {
     density,
+    language: ["en", "zh-CN"].includes(value.language) ? value.language : defaults.language,
+    theme: ["light", "warm", "mint", "dark", "deep"].includes(value.theme) ? value.theme : defaults.theme,
+    performance_mode: Object.hasOwn(PERFORMANCE_INTERVALS, value.performance_mode) ? value.performance_mode : defaults.performance_mode,
     hidden_sections: [...new Set(hidden)],
     show_idle_ai: Boolean(value.show_idle_ai),
     section_order: sectionOrder,
     process_columns: ["identity", ...columns.filter((item) => item !== "identity")],
+    provider_quotas: providerQuotas,
+    quota_updated_at: Number(value.quota_updated_at) || null,
   };
 }
 
@@ -1118,8 +1422,11 @@ function applySectionOrder() {
 }
 
 function applyPreferences(preferences, rerender = true) {
+  const previousLanguage = state.preferences.language;
+  const previousPerformanceMode = state.preferences.performance_mode;
   state.preferences = normalizePreferences(preferences);
   document.body.dataset.density = state.preferences.density;
+  applyTheme();
   applySectionOrder();
   document.querySelectorAll("[data-dashboard-section]").forEach((section) => {
     section.hidden = state.preferences.hidden_sections.includes(section.dataset.dashboardSection);
@@ -1134,10 +1441,19 @@ function applyPreferences(preferences, rerender = true) {
     input.checked = state.preferences.process_columns.includes(input.dataset.processColumn);
   });
   el.showIdleAiToggle.checked = state.preferences.show_idle_ai;
+  el.languageSelect.value = state.preferences.language;
+  el.themeSelect.value = state.preferences.theme;
+  el.performanceMode.value = state.preferences.performance_mode;
+  document.querySelectorAll("[data-quota-provider]").forEach((input) => {
+    const key = `${input.dataset.quotaWindow}_used_percent`;
+    const value = state.preferences.provider_quotas[input.dataset.quotaProvider]?.[key];
+    input.value = value === null || value === undefined ? "" : String(value);
+  });
   if (rerender && state.snapshot) {
-    renderProcesses(state.snapshot);
-    renderAi(state.snapshot);
+    renderAll();
   }
+  if (previousLanguage !== state.preferences.language || !rerender) localizeDom();
+  if (previousPerformanceMode !== state.preferences.performance_mode && state.eventSource && !state.paused) startEvents();
 }
 
 async function fetchPreferences() {
@@ -1163,6 +1479,7 @@ function schedulePreferenceSave() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
       applyPreferences(payload.preferences || state.preferences, false);
+      fetchProviderUsage();
     } catch (error) {
       showToast(error.message || "Could not save dashboard preferences", true);
     }
@@ -1177,12 +1494,26 @@ function updatePreferencesFromControls() {
     .filter((input) => input.checked)
     .map((input) => input.dataset.processColumn)];
   const density = document.querySelector('input[name="dashboardDensity"]:checked')?.value || "compact";
+  const providerQuotas = {
+    claude: { ...state.preferences.provider_quotas.claude },
+    chatgpt: { ...state.preferences.provider_quotas.chatgpt },
+    cursor: { ...state.preferences.provider_quotas.cursor },
+  };
+  document.querySelectorAll("[data-quota-provider]").forEach((input) => {
+    const key = `${input.dataset.quotaWindow}_used_percent`;
+    providerQuotas[input.dataset.quotaProvider][key] = input.value.trim() === "" ? null : Number(input.value);
+  });
   applyPreferences({
     density,
+    language: el.languageSelect.value,
+    theme: el.themeSelect.value,
+    performance_mode: el.performanceMode.value,
     hidden_sections: hidden,
     show_idle_ai: el.showIdleAiToggle.checked,
     section_order: state.preferences.section_order,
     process_columns: columns,
+    provider_quotas: providerQuotas,
+    quota_updated_at: state.preferences.quota_updated_at,
   });
   schedulePreferenceSave();
 }
@@ -1197,6 +1528,53 @@ function moveDashboardSection(id, direction) {
   schedulePreferenceSave();
 }
 
+function quotaWindowLabel(id) {
+  return id === "five_hour" ? "5 hours" : id === "weekly" ? "Weekly" : id;
+}
+
+function renderProviderUsage(model) {
+  const providers = model?.providers || [];
+  const colors = { claude: "var(--claude)", chatgpt: "var(--codex)", cursor: "var(--cursor)" };
+  el.quotaGrid.innerHTML = providers.length ? providers.map((provider) => {
+    const available = provider.status === "available";
+    const windows = provider.windows || [];
+    return `<article class="quota-card" style="--quota-color:${colors[provider.id] || "var(--line-strong)"}">
+      <div class="quota-card-head"><h3>${escapeHtml(provider.display_name)}</h3><span>${available ? "Manual local values" : "Not configured"}</span></div>
+      <div class="quota-windows">${windows.map((windowModel) => {
+        const used = windowModel.used_percent;
+        const remaining = windowModel.remaining_percent;
+        return `<div class="quota-window">
+          <div class="quota-window-head"><span>${quotaWindowLabel(windowModel.id)}</span><b>${used === null || used === undefined ? "--" : formatPct(used)}</b></div>
+          <div class="quota-track" role="progressbar" aria-label="${escapeHtml(provider.display_name)} ${quotaWindowLabel(windowModel.id)} used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${used ?? 0}"><span style="width:${clamp(used || 0)}%"></span></div>
+          <div class="quota-window-stats"><span>Used<b>${used === null || used === undefined ? "--" : formatPct(used)}</b></span><span>Remaining<b>${remaining === null || remaining === undefined ? "--" : formatPct(remaining)}</b></span></div>
+        </div>`;
+      }).join("")}</div>
+      <div class="quota-card-foot"><span>${available ? "Manual local values" : escapeHtml(provider.reason || "Not configured")}</span><span>${provider.observed_at ? formatEventTime(provider.observed_at) : "--"}</span></div>
+    </article>`;
+  }).join("") : `<div class="empty-state">No quota providers are available</div>`;
+  if (state.preferences.language === "zh-CN") localizeDom(el.quotaGrid);
+}
+
+async function fetchProviderUsage() {
+  try {
+    const response = await fetch("/api/provider-usage", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+    state.providerUsage = payload;
+  } catch (error) {
+    state.providerUsage = {
+      providers: ["claude", "chatgpt", "cursor"].map((id) => ({
+        id,
+        display_name: id === "chatgpt" ? "ChatGPT" : id[0].toUpperCase() + id.slice(1),
+        status: "error",
+        windows: [],
+        reason: error.message || "Quota data unavailable",
+      })),
+    };
+  }
+  renderProviderUsage(state.providerUsage);
+}
+
 function renderAiProjects(projects) {
   const visible = (projects || []).slice(0, 3);
   if (!visible.length) return "";
@@ -1206,7 +1584,7 @@ function renderAiProjects(projects) {
     return `<div class="zone-project">
       <div class="zone-project-head">
         <span title="${escapeHtml(project.name)}">${escapeHtml(project.name)}</span>
-        <small>${formatNumber(project.process_count || 0)}p · ${formatPct(cpu)} · ${formatBytes(project.memory_bytes || 0)}</small>
+        <small>${formatNumber(project.process_count || 0)}p · ${formatPct(cpu)} · ${formatBytes(project.memory_bytes || 0)} · ${project.disk_usage_bytes === null || project.disk_usage_bytes === undefined ? (project.disk_usage_status === "measuring" || project.disk_usage_status === "pending" ? "Measuring" : "Disk --") : formatBytes(project.disk_usage_bytes)}</small>
       </div>
       <span class="workload-track" role="progressbar" aria-label="${escapeHtml(project.name)} CPU activity" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width.toFixed(1)}"><span style="--workload-value:${width.toFixed(1)}%"></span></span>
     </div>`;
@@ -1216,26 +1594,27 @@ function renderAiProjects(projects) {
 function renderAiChildren(session) {
   if (!state.expandedAiSessions.has(session.id)) return "";
   const children = (session.children || []).slice(0, 10);
+  const childCount = Number(session.child_count ?? (session.children || []).length);
   if (!children.length) return `<div class="ai-child-empty">No child processes</div>`;
   return `<div class="ai-child-list" aria-label="Child processes">${children.map((child) => `
     <button class="ai-child-row" data-pid="${Number(child.pid || 0)}" type="button" title="${escapeHtml(child.cmdline || child.name)}">
       <span class="ai-child-name">${escapeHtml(child.label || child.name)}<small>${statusLabel(child.status)} · PID ${Number(child.pid || 0)} · ${escapeHtml(child.age_label || formatDuration(child.age_seconds || 0))}</small></span>
       <span class="ai-child-metrics">${formatPct(child.cpu_capacity_percent || 0)}<small>${formatBytes(child.memory_bytes || 0)}</small></span>
-    </button>`).join("")}${(session.children || []).length > children.length ? `<div class="ai-child-overflow">+${(session.children || []).length - children.length} more processes</div>` : ""}</div>`;
+    </button>`).join("")}${childCount > children.length ? `<div class="ai-child-overflow">+${childCount - children.length} more processes</div>` : ""}</div>`;
 }
 
 function renderAiSession(session) {
   const cpu = Number(session.cpu_capacity_percent || 0);
   const width = clamp(cpu);
-  const childCount = (session.children || []).length;
+  const childCount = Number(session.child_count ?? (session.children || []).length);
   const expanded = state.expandedAiSessions.has(session.id);
   return `<div class="session-group">
     <div class="session-main">
       <button class="session-row" data-pid="${Number(session.root?.pid || 0)}" type="button">
         <span class="session-name">${escapeHtml(session.project || session.kind_label)}<small>${escapeHtml(session.status || "IDLE")} · PID ${Number(session.root?.pid || 0)} · ${formatDuration(session.uptime_seconds || 0)}</small></span>
-        <span class="session-metrics">${formatPct(cpu)} CPU<br>${formatBytes(session.memory_bytes || 0)} RSS</span>
+        <span class="session-metrics">${formatPct(cpu)} CPU<br>${formatBytes(session.memory_bytes || 0)} RSS<br>${session.disk_usage_bytes === null || session.disk_usage_bytes === undefined ? (session.disk_usage_status === "measuring" ? "Measuring" : "Disk --") : `${formatBytes(session.disk_usage_bytes)} disk`}</span>
       </button>
-      ${childCount ? `<button class="session-expand" data-ai-session-toggle="${escapeHtml(session.id)}" type="button" aria-expanded="${expanded}" aria-label="${expanded ? "Hide" : "Show"} ${childCount} child processes" title="${expanded ? "Hide" : "Show"} ${childCount} child processes"><span>${formatNumber(childCount)}</span><span aria-hidden="true">${expanded ? "−" : "+"}</span></button>` : ""}
+      ${childCount ? `<button class="session-expand" data-ai-session-toggle="${escapeHtml(session.id)}" type="button" aria-expanded="${expanded}" aria-label="${localized(expanded ? "Hide" : "Show", expanded ? "隐藏" : "显示")} ${childCount} ${localized("child processes", "个子进程")}" title="${localized(expanded ? "Hide" : "Show", expanded ? "隐藏" : "显示")} ${childCount} ${localized("child processes", "个子进程")}"><span>${formatNumber(childCount)}</span><span aria-hidden="true">${expanded ? "−" : "+"}</span></button>` : ""}
     </div>
     <span class="session-workload workload-track" role="progressbar" aria-label="${escapeHtml(session.project || session.kind_label)} CPU activity" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${width.toFixed(1)}"><span style="--workload-value:${width.toFixed(1)}%"></span></span>
     ${renderAiChildren(session)}
@@ -1246,7 +1625,7 @@ function renderAi(snapshot) {
   const allZones = snapshot.zones || [];
   const zones = state.preferences.show_idle_ai ? allZones : allZones.filter((zone) => Number(zone.session_count || 0) > 0);
   const ai = snapshot.ai || {};
-  el.aiTotals.innerHTML = `<span><b>${formatNumber(ai.active_session_count || 0)}</b> active sessions</span><span><b>${formatBytes(ai.memory_bytes || 0)}</b> memory</span><span><b>${formatPct(ai.cpu_capacity_percent || 0)}</b> CPU</span>`;
+  el.aiTotals.innerHTML = `<span><b>${formatNumber(ai.active_session_count || 0)}</b> ${localized("active sessions", "个活跃会话")}</span><span><b>${formatBytes(ai.memory_bytes || 0)}</b> ${localized("memory", "内存")}</span><span><b>${formatPct(ai.cpu_capacity_percent || 0)}</b> CPU</span>`;
   el.aiZones.innerHTML = zones.length ? zones.map((zone) => {
     const sessions = (zone.sessions || []).filter((session) => state.preferences.show_idle_ai || session.active).slice(0, 6);
     const color = zone.id === "claude" ? "var(--claude)" : zone.id === "codex" ? "var(--codex)" : "var(--cursor)";
@@ -1254,11 +1633,15 @@ function renderAi(snapshot) {
     const currentCpu = Number(zone.cpu_capacity_percent || 0);
     const peakCpu = Math.max(currentCpu, 0, ...history);
     const activityWidth = clamp(currentCpu);
+    const providerTitle = zone.id === "codex" ? "ChatGPT" : zone.title;
+    const diskLabel = zone.disk_usage_bytes === null || zone.disk_usage_bytes === undefined
+      ? (zone.disk_usage_status === "measuring" ? "Measuring" : "--")
+      : `${zone.disk_usage_status === "partial" ? "≈" : ""}${formatBytes(zone.disk_usage_bytes)}`;
     return `<article class="zone-card" style="--zone-color:${color}">
-      <div class="zone-head"><div><h3>${escapeHtml(zone.title)}</h3><p>${formatNumber(zone.process_count || 0)} related processes</p></div><span class="zone-total">${formatNumber(zone.session_count || 0)} live</span></div>
-      <div class="zone-metrics"><span>CPU<b>${formatPct(zone.cpu_capacity_percent || 0)}</b></span><span>Memory<b>${formatBytes(zone.memory_bytes || 0)}</b></span><span>Projects<b>${formatNumber(zone.projects?.length || 0)}</b></span></div>
+      <div class="zone-head"><div><h3>${escapeHtml(providerTitle)}</h3><p>${formatNumber(zone.process_count || 0)} related processes</p></div><span class="zone-total">${formatNumber(zone.session_count || 0)} live</span></div>
+      <div class="zone-metrics"><span>CPU<b>${formatPct(zone.cpu_capacity_percent || 0)}</b></span><span>Memory<b>${formatBytes(zone.memory_bytes || 0)}</b></span><span>Disk<b>${diskLabel}</b></span><span>Projects<b>${formatNumber(zone.projects?.length || 0)}</b></span></div>
       <div class="zone-activity">
-        <div class="zone-activity-head"><span>CPU activity</span><span>Now <b>${formatPct(currentCpu)}</b> · Peak <b>${formatPct(peakCpu)}</b></span></div>
+        <div class="zone-activity-head"><span>${localized("CPU activity", "CPU 活动")}</span><span>${localized("Now", "当前")} <b>${formatPct(currentCpu)}</b> · ${localized("Peak", "峰值")} <b>${formatPct(peakCpu)}</b></span></div>
         <span class="zone-workload workload-track" role="progressbar" aria-label="${escapeHtml(zone.title)} CPU activity" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${activityWidth.toFixed(1)}"><span style="--workload-value:${activityWidth.toFixed(1)}%"></span></span>
         <div class="zone-sparkline" aria-label="${escapeHtml(zone.title)} recent CPU activity">${renderChart([{ values: history, color }], { scaleMax: Math.max(10, peakCpu), height: 28 })}</div>
       </div>
@@ -1278,15 +1661,50 @@ function renderCurrentView() {
   if (state.view === "ai") renderAi(state.snapshot);
 }
 
+function sectionNearViewport(id) {
+  const section = document.querySelector(`[data-dashboard-order="${id}"]`);
+  if (!section || section.hidden) return false;
+  const rect = section.getBoundingClientRect();
+  return rect.bottom >= -300 && rect.top <= window.innerHeight + 600;
+}
+
 function renderAll() {
   if (!state.snapshot) return;
   renderOverview(state.snapshot);
   renderAlertBadge(state.snapshot);
-  renderProcesses(state.snapshot);
   renderEvents(state.snapshot);
-  renderStorage(state.snapshot);
-  renderRuntime();
-  renderAi(state.snapshot);
+  if (sectionNearViewport("processes")) renderProcesses(state.snapshot);
+  if (sectionNearViewport("storage")) renderStorage(state.snapshot);
+  if (sectionNearViewport("coding")) renderAi(state.snapshot);
+  if (state.preferences.language === "zh-CN") localizeDom();
+}
+
+function queueSnapshot(snapshot) {
+  const fullSource = state.pendingSnapshot && !state.pendingSnapshot.stream_compact
+    ? state.pendingSnapshot
+    : state.snapshot;
+  if (snapshot.stream_compact && fullSource) {
+    snapshot = {
+      ...snapshot,
+      processes: {
+        ...(snapshot.processes || {}),
+        items: fullSource.processes?.items || [],
+      },
+      resources: {
+        ...(snapshot.resources || {}),
+        programs: fullSource.resources?.programs || [],
+      },
+    };
+  }
+  state.pendingSnapshot = snapshot;
+  if (state.renderFrame) return;
+  state.renderFrame = window.requestAnimationFrame(() => {
+    state.renderFrame = null;
+    if (state.paused || document.hidden || !state.pendingSnapshot) return;
+    state.snapshot = state.pendingSnapshot;
+    state.pendingSnapshot = null;
+    renderAll();
+  });
 }
 
 function processSnapshotByPid(pid) {
@@ -1420,10 +1838,7 @@ async function fetchSnapshot() {
     const response = await fetch("/api/snapshot", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const snapshot = await response.json();
-    if (!state.paused) {
-      state.snapshot = snapshot;
-      renderAll();
-    }
+    if (!state.paused) queueSnapshot(snapshot);
     setConnection(state.paused ? "Paused" : "Live", state.paused ? "paused" : "live");
   } catch {
     setConnection("Offline", "error");
@@ -1433,22 +1848,37 @@ async function fetchSnapshot() {
 function startFallbackPolling() {
   if (state.fallbackTimer) return;
   fetchSnapshot();
-  state.fallbackTimer = window.setInterval(fetchSnapshot, 2200);
+  state.fallbackTimer = window.setInterval(
+    fetchSnapshot,
+    PERFORMANCE_INTERVALS[state.preferences.performance_mode] * 1000,
+  );
+}
+
+function stopEvents() {
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+  if (state.fallbackTimer) {
+    window.clearInterval(state.fallbackTimer);
+    state.fallbackTimer = null;
+  }
 }
 
 function startEvents() {
+  stopEvents();
+  if (state.paused || document.hidden) return;
   if (!window.EventSource) {
     startFallbackPolling();
     return;
   }
-  state.eventSource = new EventSource("/events");
+  const interval = PERFORMANCE_INTERVALS[state.preferences.performance_mode] || 3;
+  state.eventSource = new EventSource(`/events?interval=${encodeURIComponent(interval)}`);
   state.eventSource.addEventListener("snapshot", (event) => {
+    if (state.paused || document.hidden) return;
     try {
       const snapshot = JSON.parse(event.data);
-      if (!state.paused) {
-        state.snapshot = snapshot;
-        renderAll();
-      }
+      queueSnapshot(snapshot);
       setConnection(state.paused ? "Paused" : "Live", state.paused ? "paused" : "live");
     } catch {
       setConnection("Data error", "error");
@@ -1462,6 +1892,45 @@ function startEvents() {
       startFallbackPolling();
     }
   };
+}
+
+function startRuntimePolling() {
+  if (!state.runtimeVisible || state.paused || document.hidden) return;
+  if (!state.services) fetchServices();
+  if (!state.networkAttribution) fetchNetwork();
+  if (!state.containers) fetchContainers();
+  if (!state.runtimeTimer) {
+    state.runtimeTimer = window.setInterval(() => {
+      if (state.runtimeVisible && !state.paused && !document.hidden) fetchNetwork(true);
+    }, 10000);
+  }
+  if (!state.containerTimer) {
+    state.containerTimer = window.setInterval(() => {
+      if (state.runtimeVisible && !state.paused && !document.hidden) fetchContainers(true);
+    }, 30000);
+  }
+}
+
+function stopRuntimePolling() {
+  if (state.runtimeTimer) window.clearInterval(state.runtimeTimer);
+  if (state.containerTimer) window.clearInterval(state.containerTimer);
+  state.runtimeTimer = null;
+  state.containerTimer = null;
+}
+
+function startProcessPolling() {
+  if (state.paused || document.hidden || !sectionNearViewport("processes")) return;
+  fetchSnapshot();
+  if (!state.processTimer) {
+    state.processTimer = window.setInterval(() => {
+      if (!state.paused && !document.hidden && sectionNearViewport("processes")) fetchSnapshot();
+    }, 9000);
+  }
+}
+
+function stopProcessPolling() {
+  if (state.processTimer) window.clearInterval(state.processTimer);
+  state.processTimer = null;
 }
 
 document.addEventListener("click", (event) => {
@@ -1534,12 +2003,23 @@ el.pauseBtn.addEventListener("click", () => {
   const label = el.pauseBtn.querySelector(".pause-label");
   if (label) label.textContent = state.paused ? "Resume" : "Pause";
   setConnection(state.paused ? "Paused" : "Live", state.paused ? "paused" : "live");
+  if (state.paused) {
+    stopEvents();
+    stopRuntimePolling();
+    stopProcessPolling();
+  } else {
+    startEvents();
+    startRuntimePolling();
+    startProcessPolling();
+  }
+  localizeDom(el.pauseBtn);
 });
 
 el.processSearch.addEventListener("input", (event) => {
   state.processQuery = event.target.value.trim();
   state.processLimit = 80;
-  renderProcesses(state.snapshot);
+  window.clearTimeout(state.searchTimer);
+  state.searchTimer = window.setTimeout(() => renderProcesses(state.snapshot), 150);
 });
 
 el.processScope.addEventListener("change", (event) => {
@@ -1562,7 +2042,7 @@ el.showMoreProcesses.addEventListener("click", () => {
 el.saveThresholds.addEventListener("click", saveThresholds);
 
 document.addEventListener("change", (event) => {
-  if (event.target.matches("[data-section-toggle], [data-process-column], input[name='dashboardDensity'], #showIdleAiToggle")) {
+  if (event.target.matches("[data-section-toggle], [data-process-column], [data-quota-provider], input[name='dashboardDensity'], #showIdleAiToggle, #languageSelect, #themeSelect, #performanceMode")) {
     updatePreferencesFromControls();
   }
 });
@@ -1570,10 +2050,18 @@ document.addEventListener("change", (event) => {
 el.resetPreferences.addEventListener("click", () => {
   applyPreferences({
     density: "compact",
+    language: "en",
+    theme: "deep",
+    performance_mode: "balanced",
     hidden_sections: [],
     show_idle_ai: false,
     section_order: [...SECTION_ORDER_DEFAULT],
     process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
+    provider_quotas: {
+      claude: { five_hour_used_percent: null, weekly_used_percent: null },
+      chatgpt: { five_hour_used_percent: null, weekly_used_percent: null },
+      cursor: { five_hour_used_percent: null, weekly_used_percent: null },
+    },
   });
   schedulePreferenceSave();
   showToast("Dashboard preferences reset");
@@ -1611,16 +2099,47 @@ el.detailsBody.addEventListener("click", (event) => {
   if (actionButton) runProcessAction(actionButton.dataset.processAction);
 });
 
-applyPreferences(state.preferences, false);
-fetchPreferences();
-startEvents();
-fetchHistory(state.historyRange);
-fetchServices();
-fetchNetwork();
-fetchContainers();
-state.runtimeTimer = window.setInterval(() => {
-  if (!state.paused) fetchNetwork(true);
-}, 4000);
-state.containerTimer = window.setInterval(() => {
-  if (!state.paused) fetchContainers(true);
-}, 8000);
+const sectionObserver = new IntersectionObserver((entries) => {
+  entries.forEach((entry) => {
+    const id = entry.target.dataset.dashboardOrder;
+    if (id === "runtime") {
+      state.runtimeVisible = entry.isIntersecting && !entry.target.hidden;
+      if (state.runtimeVisible) startRuntimePolling();
+      else stopRuntimePolling();
+      return;
+    }
+    if (id === "processes" && !entry.isIntersecting) stopProcessPolling();
+    if (!entry.isIntersecting || !state.snapshot) return;
+    if (id === "processes") {
+      renderProcesses(state.snapshot);
+      startProcessPolling();
+    }
+    if (id === "storage") renderStorage(state.snapshot);
+    if (id === "coding") renderAi(state.snapshot);
+    if (state.preferences.language === "zh-CN") localizeDom(entry.target);
+  });
+}, { rootMargin: "600px 0px 300px" });
+document.querySelectorAll("[data-dashboard-order]").forEach((section) => sectionObserver.observe(section));
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    stopEvents();
+    stopRuntimePolling();
+    stopProcessPolling();
+  } else if (!state.paused) {
+    startEvents();
+    startRuntimePolling();
+    startProcessPolling();
+  }
+});
+
+async function bootstrap() {
+  applyPreferences(state.preferences, false);
+  await fetchPreferences();
+  await fetchProviderUsage();
+  startEvents();
+  fetchHistory(state.historyRange);
+  localizeDom();
+}
+
+bootstrap();

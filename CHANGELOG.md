@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased — 2026-07-22
+
+### Language, appearance, and AI workload context
+
+- Added a unified Settings entry for English/Simplified Chinese, five persisted
+  themes, density, section ordering, process columns, and refresh policy.
+- Standardized user-facing Codex/OpenAI workload labels as ChatGPT while
+  retaining stable internal detector identifiers.
+- Added per-provider quota cards for Claude, ChatGPT, and Cursor. Values are
+  optional local percentages and remain explicitly unavailable until configured.
+- Added staggered, cached project allocation measurements to AI workload,
+  project, and session cards without running `du` on the hot sampling path.
+- Added best-effort CPU temperature reporting with explicit unsupported states.
+
+### Performance and resource management
+
+- Cached stable process metadata and slow system probes, and removed repeated
+  socket, SQLite, and system-memory reads from the snapshot hot path.
+- Reduced the live SSE payload to summary data; full process/program arrays are
+  fetched only while the process section is near the viewport.
+- Added balanced 3-second and efficient 5-second refresh modes, visibility-aware
+  pause/resume, lazy runtime polling, request de-duplication, and animation-frame
+  render coalescing.
+- Added tests for language/theme controls, quota normalization, compact streams,
+  workload disk attribution, CPU temperature probing, and polling regressions.
+
 ## 0.4.0 — 2026-07-21
 
 ### Compact system dashboard

@@ -13,8 +13,10 @@ import io
 import os
 import platform
 import plistlib
+import re
 import shutil
 import subprocess
+import threading
 import time
 from collections import Counter, deque
 from pathlib import Path
@@ -22,11 +24,13 @@ from typing import Any
 
 import psutil
 
-from .monitor import ProcSample
+from .monitor import ProcSample, Session
 from .storage import SmartCollector
 
 
 GPU_SAMPLE_TIMEOUT_S = 1.0
+CPU_TEMPERATURE_TIMEOUT_S = 1.0
+WORKLOAD_DISK_TIMEOUT_S = 1.25
 PROTECTED_PROCESS_IDS = {0, 1}
 
 
@@ -346,13 +350,276 @@ class GpuCollector:
         }
 
 
+class CpuTemperatureCollector:
+    """Best-effort CPU package temperature with an explicit unavailable state."""
+
+    def __init__(self, cache_seconds: float = 10.0) -> None:
+        self.cache_seconds = max(5.0, float(cache_seconds))
+        self.platform = platform.system()
+        self.osx_cpu_temp = shutil.which("osx-cpu-temp") if self.platform == "Darwin" else None
+        self._cached: dict[str, Any] | None = None
+        self._cached_at = 0.0
+
+    def sample(self, sensors: list[dict[str, Any]]) -> dict[str, Any]:
+        now = time.monotonic()
+        if self._cached is not None and now - self._cached_at < self.cache_seconds:
+            return self._cached
+
+        cpu_sensors = [
+            sensor
+            for sensor in sensors
+            if re.search(
+                r"(?:cpu|core|package|soc|tctl|tdie)",
+                f"{sensor.get('group', '')} {sensor.get('label', '')}",
+                re.IGNORECASE,
+            )
+            and sensor.get("current_c") is not None
+        ]
+        if cpu_sensors:
+            hottest = max(cpu_sensors, key=lambda item: float(item.get("current_c") or 0.0))
+            result = {
+                "available": True,
+                "temperature_c": float(hottest["current_c"]),
+                "provider": "psutil sensors",
+                "label": hottest.get("label") or hottest.get("group") or "CPU",
+                "sampled_at": time.time(),
+                "note": "Hottest readable CPU-related sensor.",
+            }
+        elif self.osx_cpu_temp:
+            result = self._sample_osx_cpu_temp()
+        else:
+            result = {
+                "available": False,
+                "temperature_c": None,
+                "provider": "none",
+                "label": "CPU",
+                "sampled_at": time.time(),
+                "note": (
+                    "macOS does not expose CPU temperature to unprivileged psutil; "
+                    "configure a compatible unprivileged temperature helper to enable this reading."
+                    if self.platform == "Darwin"
+                    else "No readable CPU temperature sensor was detected on this system."
+                ),
+            }
+        self._cached = result
+        self._cached_at = now
+        return result
+
+    def _sample_osx_cpu_temp(self) -> dict[str, Any]:
+        try:
+            result = subprocess.run(
+                [str(self.osx_cpu_temp), "-C"],
+                capture_output=True,
+                text=True,
+                timeout=CPU_TEMPERATURE_TIMEOUT_S,
+                check=False,
+            )
+            match = (
+                re.search(r"(-?\d+(?:\.\d+)?)", result.stdout)
+                if result.returncode == 0
+                else None
+            )
+        except (OSError, subprocess.SubprocessError):
+            match = None
+        temperature = float(match.group(1)) if match else None
+        if temperature is not None and 0.0 <= temperature <= 130.0:
+            return {
+                "available": True,
+                "temperature_c": temperature,
+                "provider": "osx-cpu-temp",
+                "label": "CPU package",
+                "sampled_at": time.time(),
+                "note": "Temperature is read through the optional osx-cpu-temp helper.",
+            }
+        return {
+            "available": False,
+            "temperature_c": None,
+            "provider": "osx-cpu-temp",
+            "label": "CPU",
+            "sampled_at": time.time(),
+            "note": "osx-cpu-temp is installed but returned no readable temperature.",
+        }
+
+
+class WorkloadDiskCollector:
+    """Measure active project allocation asynchronously and retain a long cache."""
+
+    def __init__(
+        self,
+        cache_seconds: float = 300.0,
+        min_probe_interval_s: float = 5.0,
+    ) -> None:
+        self.cache_seconds = max(60.0, float(cache_seconds))
+        self.min_probe_interval_s = max(1.0, float(min_probe_interval_s))
+        self.du = shutil.which("du")
+        self.nice = shutil.which("nice")
+        self._cache: dict[str, dict[str, Any]] = {}
+        self._pending: set[str] = set()
+        self._last_probe_at = 0.0
+        self._lock = threading.Lock()
+
+    def sample(self, sessions: list[Session]) -> dict[str, Any]:
+        projects: dict[str, str] = {}
+        home = Path.home().resolve()
+        broad_home_directories = {
+            home / name
+            for name in (
+                "Desktop",
+                "Documents",
+                "Downloads",
+                "Library",
+                ".codex",
+                ".cursor",
+                ".vscode",
+            )
+        }
+        for session in sessions:
+            for project in session.project_stats:
+                if not project.path:
+                    continue
+                try:
+                    resolved = Path(project.path).resolve()
+                    if not resolved.is_relative_to(home) or resolved in broad_home_directories:
+                        continue
+                except (OSError, RuntimeError):
+                    continue
+                projects[str(resolved)] = project.name
+
+        now = time.monotonic()
+        with self._lock:
+            if len(self._cache) > 128:
+                inactive = sorted(
+                    (
+                        (path, float(value.get("monotonic_at") or 0.0))
+                        for path, value in self._cache.items()
+                        if path not in projects and path not in self._pending
+                    ),
+                    key=lambda item: item[1],
+                )
+                for path, _sampled_at in inactive[: max(0, len(self._cache) - 128)]:
+                    self._cache.pop(path, None)
+            due = [
+                path
+                for path in projects
+                if path not in self._pending
+                and (
+                    path not in self._cache
+                    or now - float(self._cache[path].get("monotonic_at") or 0.0)
+                    >= float(self._cache[path].get("ttl_seconds") or self.cache_seconds)
+                )
+            ]
+            if due and now - self._last_probe_at >= self.min_probe_interval_s:
+                path = due[0]
+                self._pending.add(path)
+                self._last_probe_at = now
+                threading.Thread(
+                    target=self._probe_and_store,
+                    args=(path,),
+                    daemon=True,
+                    name="see-aicoding-workload-disk",
+                ).start()
+
+            items = []
+            for path, name in projects.items():
+                cached = self._cache.get(path)
+                if cached:
+                    items.append(
+                        {
+                            key: value
+                            for key, value in cached.items()
+                            if key not in {"monotonic_at", "ttl_seconds"}
+                        }
+                    )
+                else:
+                    items.append(
+                        {
+                            "path": path,
+                            "name": name,
+                            "allocated_bytes": None,
+                            "status": "measuring" if path in self._pending else "pending",
+                            "sampled_at": None,
+                            "note": "Queued for a staggered background disk measurement.",
+                        }
+                    )
+        return {
+            "provider": "du" if self.du else "none",
+            "cache_seconds": self.cache_seconds,
+            "items": items,
+            "pending_count": sum(item["status"] in {"pending", "measuring"} for item in items),
+        }
+
+    def _probe_and_store(self, path: str) -> None:
+        result = self._probe(path)
+        with self._lock:
+            self._cache[path] = {
+                **result,
+                "monotonic_at": time.monotonic(),
+                "ttl_seconds": self.cache_seconds if result["status"] == "available" else 60.0,
+            }
+            self._pending.discard(path)
+
+    def _probe(self, path: str) -> dict[str, Any]:
+        sampled_at = time.time()
+        name = Path(path).name or path
+        if not self.du:
+            return {
+                "path": path,
+                "name": name,
+                "allocated_bytes": None,
+                "status": "unavailable",
+                "sampled_at": sampled_at,
+                "note": "The du command is unavailable.",
+            }
+        try:
+            command = [str(self.du), "-sk", path]
+            if self.nice:
+                command = [str(self.nice), "-n", "10", *command]
+            process = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=WORKLOAD_DISK_TIMEOUT_S,
+                check=False,
+            )
+            blocks = int(process.stdout.split()[0]) if process.returncode == 0 else None
+        except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+            blocks = None
+        return {
+            "path": path,
+            "name": name,
+            "allocated_bytes": blocks * 1024 if blocks is not None else None,
+            "status": "available" if blocks is not None else "unavailable",
+            "sampled_at": sampled_at,
+            "note": (
+                "Allocated project size; refreshed in a staggered background probe."
+                if blocks is not None
+                else "Project size probe timed out or the path was not readable."
+            ),
+        }
+
+
 class SystemTelemetry:
     """Collect system metrics and retain a short in-memory history."""
 
     def __init__(self, maxlen: int = 60) -> None:
         self.maxlen = maxlen
         self.gpu = GpuCollector()
+        self.cpu_temperature = CpuTemperatureCollector()
         self.smart = SmartCollector()
+        self._gpu_cached: dict[str, Any] | None = None
+        self._gpu_cached_at = 0.0
+        self._disks_cached: list[dict[str, Any]] | None = None
+        self._disks_cached_at = 0.0
+        self._sensors_cached: list[dict[str, Any]] = []
+        self._sensors_cached_at = 0.0
+        self._battery_cached: dict[str, Any] | None = None
+        self._battery_cached_at = 0.0
+        self._frequency_cached: Any = None
+        self._frequency_cached_at = 0.0
+        self._boot_time = psutil.boot_time()
+        self._logical_cpus = psutil.cpu_count() or 1
+        self._physical_cpus = psutil.cpu_count(logical=False) or self._logical_cpus
+        self._current_user = getpass.getuser()
         self.history: dict[str, deque[float]] = {
             key: deque(maxlen=maxlen)
             for key in (
@@ -574,7 +841,7 @@ class SystemTelemetry:
                         "critical_c": entry.critical,
                     }
                 )
-        return sensors[:12]
+        return sensors[:32]
 
     def sample(
         self,
@@ -590,10 +857,14 @@ class SystemTelemetry:
             cpu_times = psutil.cpu_times_percent(interval=None)
         except (OSError, RuntimeError):
             cpu_times = None
-        try:
-            frequency = psutil.cpu_freq()
-        except (OSError, RuntimeError):
-            frequency = None
+        monotonic_now = time.monotonic()
+        if monotonic_now - self._frequency_cached_at >= 5.0:
+            try:
+                self._frequency_cached = psutil.cpu_freq()
+            except (OSError, RuntimeError):
+                self._frequency_cached = None
+            self._frequency_cached_at = monotonic_now
+        frequency = self._frequency_cached
         try:
             load_average = os.getloadavg()
         except (AttributeError, OSError):
@@ -601,12 +872,22 @@ class SystemTelemetry:
 
         memory_used = max(0, vm.total - vm.available)
         memory_percent = memory_used / vm.total * 100.0 if vm.total else 0.0
-        gpu = self.gpu.sample(vm.total)
+        if self._gpu_cached is None or monotonic_now - self._gpu_cached_at >= 5.0:
+            self._gpu_cached = self.gpu.sample(vm.total)
+            self._gpu_cached_at = monotonic_now
+        gpu = self._gpu_cached
         disk_io = self._disk_rates()
-        disks = self._disks()
+        if self._disks_cached is None or monotonic_now - self._disks_cached_at >= 15.0:
+            self._disks_cached = self._disks()
+            self._disks_cached_at = time.monotonic()
+        disks = self._disks_cached
         storage_health = self.smart.sample(disks)
         statuses = Counter(proc.status for proc in procs.values())
-        current_user = getpass.getuser()
+        if monotonic_now - self._sensors_cached_at >= 10.0:
+            self._sensors_cached = self._sensors()
+            self._sensors_cached_at = monotonic_now
+        sensors = self._sensors_cached
+        cpu_temperature = self.cpu_temperature.sample(sensors)
 
         values = {
             "cpu_percent": cpu_percent,
@@ -624,25 +905,29 @@ class SystemTelemetry:
         for key, value in values.items():
             self.history[key].append(float(value))
 
-        battery = None
-        battery_fn = getattr(psutil, "sensors_battery", None)
-        if battery_fn is not None:
-            try:
-                battery_value = battery_fn()
-            except (OSError, RuntimeError):
-                battery_value = None
-            if battery_value is not None:
-                battery = {
-                    "percent": battery_value.percent,
-                    "plugged": battery_value.power_plugged,
-                    "seconds_left": battery_value.secsleft,
-                }
+        if monotonic_now - self._battery_cached_at >= 10.0:
+            battery = None
+            battery_fn = getattr(psutil, "sensors_battery", None)
+            if battery_fn is not None:
+                try:
+                    battery_value = battery_fn()
+                except (OSError, RuntimeError):
+                    battery_value = None
+                if battery_value is not None:
+                    battery = {
+                        "percent": battery_value.percent,
+                        "plugged": battery_value.power_plugged,
+                        "seconds_left": battery_value.secsleft,
+                    }
+            self._battery_cached = battery
+            self._battery_cached_at = monotonic_now
+        battery = self._battery_cached
 
         return {
-            "boot_time": psutil.boot_time(),
-            "uptime_seconds": max(0.0, time.time() - psutil.boot_time()),
-            "logical_cpus": psutil.cpu_count() or 1,
-            "physical_cpus": psutil.cpu_count(logical=False) or psutil.cpu_count() or 1,
+            "boot_time": self._boot_time,
+            "uptime_seconds": max(0.0, time.time() - self._boot_time),
+            "logical_cpus": self._logical_cpus,
+            "physical_cpus": self._physical_cpus,
             "cpu": {
                 "percent": cpu_percent,
                 "per_core_percent": per_core,
@@ -655,6 +940,7 @@ class SystemTelemetry:
                 "user_percent": getattr(cpu_times, "user", None),
                 "system_percent": getattr(cpu_times, "system", None),
                 "idle_percent": getattr(cpu_times, "idle", None),
+                "temperature": cpu_temperature,
             },
             "memory": {
                 "total_bytes": vm.total,
@@ -689,9 +975,9 @@ class SystemTelemetry:
                 "stopped": statuses.get(getattr(psutil, "STATUS_STOPPED", "stopped"), 0),
                 "zombie": statuses.get(getattr(psutil, "STATUS_ZOMBIE", "zombie"), 0),
                 "threads": sum(proc.num_threads for proc in procs.values()),
-                "current_user": sum(proc.username == current_user for proc in procs.values()),
+                "current_user": sum(proc.username == self._current_user for proc in procs.values()),
             },
-            "sensors": self._sensors(),
+            "sensors": sensors,
             "battery": battery,
             "history": {key: list(values) for key, values in self.history.items()},
         }

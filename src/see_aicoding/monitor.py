@@ -64,7 +64,7 @@ KIND_META: dict[str, tuple[str, str]] = {
     KIND_CLAUDE_DESKTOP: ("Claude Desktop", "#B48CFF"),
     KIND_CODEX_DESKTOP: ("Codex Desktop", "#30D5A8"),
     KIND_CODEX_CLI: ("Codex CLI", "#30D5A8"),
-    KIND_OPENAI_CURSOR: ("OpenAI/Codex in Cursor", "#30D5A8"),
+    KIND_OPENAI_CURSOR: ("ChatGPT in Cursor", "#30D5A8"),
     KIND_OTHER_AI_CURSOR: ("Other AI in Cursor", "#43BFF2"),
     KIND_CURSOR_IDE: ("Cursor IDE", "#43BFF2"),
     KIND_MCP: ("MCP", "#A1ACB8"),
@@ -76,7 +76,7 @@ KIND_META: dict[str, tuple[str, str]] = {
 ZONE_META: dict[str, tuple[str, str, str]] = {
     # zone_id: (title, color, emoji)
     ZONE_CLAUDE: ("Claude", "#B48CFF", "◆"),
-    ZONE_CODEX: ("Codex / OpenAI", "#30D5A8", "◆"),
+    ZONE_CODEX: ("ChatGPT", "#30D5A8", "◆"),
     ZONE_CURSOR: ("Cursor IDE", "#43BFF2", "◆"),
 }
 
@@ -193,13 +193,13 @@ def fmt_duration(secs: float) -> str:
 
 
 @functools.lru_cache(maxsize=1024)
-def derive_project(cwd: str | None) -> str:
+def derive_project_root(cwd: str | None) -> str | None:
     if not cwd or cwd == "/":
-        return "—"
+        return None
     p = Path(cwd)
     home = Path.home()
     if p == home:
-        return "—"
+        return None
     ignored_prefixes = (
         "/tmp",
         "/private/tmp",
@@ -209,32 +209,42 @@ def derive_project(cwd: str | None) -> str:
         "/Applications",
     )
     if any(str(p).startswith(prefix) for prefix in ignored_prefixes):
-        return "—"
+        return None
     ignored_home_dirs = (
         home / ".codex" / "plugins",
         home / ".cursor" / "extensions",
         home / ".vscode" / "extensions",
     )
     if any(str(p).startswith(str(prefix)) for prefix in ignored_home_dirs):
-        return "—"
+        return None
     ignored_names = {
         "screen_recording",
     }
     if p.name in ignored_names:
-        return "—"
+        return None
     markers = ("package.json", ".git", "Cargo.toml", "pyproject.toml", "go.mod")
     cur = p
     for _ in range(8):
         for m in markers:
             if (cur / m).exists():
-                return cur.name
+                return str(cur)
         if cur.parent == cur:
             break
         cur = cur.parent
+    return str(p) if p.name else None
+
+
+@functools.lru_cache(maxsize=1024)
+def derive_project(cwd: str | None) -> str:
+    root = derive_project_root(cwd)
+    if not root:
+        return "—"
+    p = Path(root)
+    home = Path.home()
     try:
         rel = p.relative_to(home)
         parts = rel.parts
-        if parts:
+        if parts and not any((p / marker).exists() for marker in ("package.json", ".git", "Cargo.toml", "pyproject.toml", "go.mod")):
             return parts[-1] if len(parts) <= 2 else parts[-2]
     except ValueError:
         pass
@@ -253,7 +263,7 @@ FALLBACK_PROJECT_BY_KIND = {
     KIND_CODEX_DESKTOP: "(Codex Desktop app)",
     KIND_CLAUDE_DESKTOP: "(Claude Desktop app)",
     KIND_CODEX_CLI: "(Codex CLI)",
-    KIND_OPENAI_CURSOR: "(Cursor OpenAI/Codex ext)",
+    KIND_OPENAI_CURSOR: "(Cursor ChatGPT extension)",
     KIND_OTHER_AI_CURSOR: "(AI extension)",
     KIND_CURSOR_IDE: "(Cursor IDE)",
 }
@@ -299,6 +309,7 @@ def session_project(p: "ProcSample") -> str:
 @dataclass
 class ProjectSummary:
     name: str
+    path: str | None = None
     cpu: float = 0.0
     rss: int = 0
     proc_count: int = 0
@@ -320,7 +331,15 @@ def infer_session_project_stats(
             project = fallback_project
         if not is_meaningful_project(project):
             continue
-        summary = projects.setdefault(project, ProjectSummary(name=project))
+        project_path = derive_project_root(sample.cwd)
+        if not project_path and fallback_project:
+            project_path = derive_project_root(root.cwd)
+        summary = projects.setdefault(
+            project,
+            ProjectSummary(name=project, path=project_path),
+        )
+        if summary.path is None and project_path:
+            summary.path = project_path
         summary.cpu += sample.cpu_percent
         summary.rss += sample.rss
         summary.proc_count += 1
@@ -463,6 +482,8 @@ class Sampler:
         self._cache: dict[int, psutil.Process] = {}
         self._create_times: dict[int, float] = {}
         self._io_counters: dict[int, tuple[int, int, float]] = {}
+        self._static_info: dict[int, tuple[float, dict[str, object]]] = {}
+        self._static_refresh_s = 30.0
 
     def _get(self, pid: int) -> psutil.Process | None:
         proc = self._cache.get(pid)
@@ -474,6 +495,8 @@ class Sampler:
                 pass
             self._cache.pop(pid, None)
             self._create_times.pop(pid, None)
+            self._io_counters.pop(pid, None)
+            self._static_info.pop(pid, None)
         try:
             proc = psutil.Process(pid)
             self._cache[pid] = proc
@@ -487,33 +510,47 @@ class Sampler:
         out: dict[int, ProcSample] = {}
         alive: set[int] = set()
         username = os.environ.get("USER") or None
-        for proc in psutil.process_iter(["pid", "username"]):
+        for proc in psutil.process_iter(["pid"]):
             try:
                 pid = proc.info["pid"]
-                proc_username = proc.info.get("username") or ""
-                if (
-                    not self.include_all_users
-                    and username is not None
-                    and proc_username != username
-                ):
-                    continue
                 alive.add(pid)
                 p = self._get(pid)
                 if p is None:
                     continue
+                now = time.monotonic()
+                cached_static = self._static_info.get(pid)
                 with p.oneshot():
-                    try:
-                        cmd_list = p.cmdline()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        cmd_list = []
-                    try:
-                        exe = p.exe()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        exe = ""
-                    try:
-                        cwd = p.cwd()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        cwd = None
+                    if cached_static is None or now - cached_static[0] >= self._static_refresh_s:
+                        try:
+                            cmd_list = p.cmdline()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            cmd_list = []
+                        try:
+                            exe = p.exe()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            exe = ""
+                        try:
+                            cwd = p.cwd()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            cwd = None
+                        static_info: dict[str, object] = {
+                            "ppid": p.ppid(),
+                            "name": p.name(),
+                            "exe": exe or "",
+                            "cmdline_str": " ".join(cmd_list) if cmd_list else (exe or p.name()),
+                            "cwd": cwd,
+                            "username": p.username(),
+                        }
+                        self._static_info[pid] = (now, static_info)
+                    else:
+                        static_info = cached_static[1]
+                    proc_username = str(static_info["username"])
+                    if (
+                        not self.include_all_users
+                        and username is not None
+                        and proc_username != username
+                    ):
+                        continue
                     try:
                         memory_info = p.memory_info()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -555,12 +592,12 @@ class Sampler:
 
                     sample = ProcSample(
                         pid=pid,
-                        ppid=p.ppid(),
-                        name=p.name(),
-                        exe=exe or "",
-                        cmdline_str=" ".join(cmd_list) if cmd_list else (exe or p.name()),
+                        ppid=int(static_info["ppid"]),
+                        name=str(static_info["name"]),
+                        exe=str(static_info["exe"]),
+                        cmdline_str=str(static_info["cmdline_str"]),
                         create_time=self._create_times.get(pid, 0.0),
-                        cwd=cwd,
+                        cwd=str(static_info["cwd"]) if static_info["cwd"] is not None else None,
                         cpu_percent=p.cpu_percent(interval=None),
                         rss=memory_info.rss if memory_info else 0,
                         vms=memory_info.vms if memory_info else 0,
@@ -582,6 +619,7 @@ class Sampler:
             self._cache.pop(dead, None)
             self._create_times.pop(dead, None)
             self._io_counters.pop(dead, None)
+            self._static_info.pop(dead, None)
         return out
 
 

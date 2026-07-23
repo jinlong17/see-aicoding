@@ -23,7 +23,12 @@ from .observability import ThresholdEngine
 from .persistence import HistoryStore
 from .runtime import ContainerCollector, NetworkAttributionCollector, ServiceCollector
 from .snapshot import build_snapshot
-from .telemetry import SystemTelemetry, inspect_process, manage_process
+from .telemetry import (
+    SystemTelemetry,
+    WorkloadDiskCollector,
+    inspect_process,
+    manage_process,
+)
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -60,6 +65,9 @@ _PROCESS_COLUMN_IDS = {
 }
 DEFAULT_DASHBOARD_PREFERENCES = {
     "density": "compact",
+    "language": "en",
+    "theme": "deep",
+    "performance_mode": "balanced",
     "hidden_sections": [],
     "show_idle_ai": False,
     "section_order": [
@@ -83,18 +91,45 @@ DEFAULT_DASHBOARD_PREFERENCES = {
         "threads",
         "age",
     ],
+    "provider_quotas": {
+        provider: {
+            "five_hour_used_percent": None,
+            "weekly_used_percent": None,
+        }
+        for provider in ("claude", "chatgpt", "cursor")
+    },
+    "quota_updated_at": None,
 }
+
+
+def _optional_percent(value: object) -> float | None:
+    if value in {None, ""}:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(min(100.0, max(0.0, result)), 2)
 
 
 def normalize_dashboard_preferences(value: object) -> dict:
     """Return the safe, forwards-compatible subset of dashboard preferences."""
     source = value if isinstance(value, dict) else {}
     density = source.get("density")
+    language = source.get("language")
+    theme = source.get("theme")
+    performance_mode = source.get("performance_mode")
     hidden = source.get("hidden_sections")
     columns = source.get("process_columns")
     order = source.get("section_order")
     if density not in {"compact", "comfortable"}:
         density = DEFAULT_DASHBOARD_PREFERENCES["density"]
+    if language not in {"en", "zh-CN"}:
+        language = DEFAULT_DASHBOARD_PREFERENCES["language"]
+    if theme not in {"light", "warm", "mint", "dark", "deep"}:
+        theme = DEFAULT_DASHBOARD_PREFERENCES["theme"]
+    if performance_mode not in {"realtime", "balanced", "efficient"}:
+        performance_mode = DEFAULT_DASHBOARD_PREFERENCES["performance_mode"]
     if not isinstance(hidden, list):
         hidden = []
     if not isinstance(columns, list):
@@ -115,8 +150,30 @@ def normalize_dashboard_preferences(value: object) -> dict:
     ]
     if "identity" not in safe_columns:
         safe_columns.insert(0, "identity")
+    raw_quotas = source.get("provider_quotas")
+    raw_quotas = raw_quotas if isinstance(raw_quotas, dict) else {}
+    provider_quotas = {}
+    for provider in ("claude", "chatgpt", "cursor"):
+        raw_provider = raw_quotas.get(provider)
+        raw_provider = raw_provider if isinstance(raw_provider, dict) else {}
+        provider_quotas[provider] = {
+            "five_hour_used_percent": _optional_percent(
+                raw_provider.get("five_hour_used_percent")
+            ),
+            "weekly_used_percent": _optional_percent(
+                raw_provider.get("weekly_used_percent")
+            ),
+        }
+    quota_updated_at = source.get("quota_updated_at")
+    try:
+        quota_updated_at = float(quota_updated_at) if quota_updated_at is not None else None
+    except (TypeError, ValueError):
+        quota_updated_at = None
     return {
         "density": density,
+        "language": language,
+        "theme": theme,
+        "performance_mode": performance_mode,
         "hidden_sections": sorted({
             item for item in hidden
             if isinstance(item, str) and item in _DASHBOARD_SECTION_IDS
@@ -124,6 +181,8 @@ def normalize_dashboard_preferences(value: object) -> dict:
         "show_idle_ai": bool(source.get("show_idle_ai", False)),
         "section_order": safe_order,
         "process_columns": safe_columns,
+        "provider_quotas": provider_quotas,
+        "quota_updated_at": quota_updated_at,
     }
 
 
@@ -133,6 +192,7 @@ class MonitorState:
         self.sampler = Sampler(include_all_users=True)
         self.history = History()
         self.telemetry = SystemTelemetry()
+        self.workload_disk = WorkloadDiskCollector()
         self.store = HistoryStore(persist_interval_s=max(5.0, self.refresh_s))
         stored_thresholds = self.store.load_setting("thresholds", {})
         self.thresholds = ThresholdEngine(
@@ -145,43 +205,134 @@ class MonitorState:
         self._lock = threading.Lock()
         self._runtime_lock = threading.Lock()
         self._cached_json = ""
+        self._cached_stream_json = ""
+        self._cached_snapshot: dict | None = None
         self._cached_at = 0.0
+        self._observability_cache: dict | None = None
+        self._observability_cached_at = 0.0
 
         self.sampler.snapshot()
         time.sleep(min(0.5, self.refresh_s))
 
-    def snapshot_json(self) -> str:
+    @staticmethod
+    def _compact_snapshot(snapshot: dict) -> dict:
+        processes = snapshot.get("processes") or {}
+        resources = snapshot.get("resources") or {}
+        observability = snapshot.get("observability") or {}
+
+        def compact_leader(item: dict) -> dict:
+            return {
+                key: item.get(key)
+                for key in (
+                    "label",
+                    "primary_pid",
+                    "process_count",
+                    "cpu_capacity_percent",
+                    "memory_bytes",
+                    "gpu_percent",
+                    "gpu_memory_bytes",
+                )
+                if key in item
+            }
+
+        compact_zones = []
+        for zone in snapshot.get("zones") or []:
+            sessions = []
+            for session in zone.get("sessions") or []:
+                children = session.get("children") or []
+                compact_children = [
+                    {
+                        key: child.get(key)
+                        for key in (
+                            "pid",
+                            "name",
+                            "label",
+                            "cmdline",
+                            "age_seconds",
+                            "age_label",
+                            "cpu_capacity_percent",
+                            "memory_bytes",
+                            "status",
+                        )
+                        if key in child
+                    }
+                    for child in children[:10]
+                ]
+                sessions.append(
+                    {
+                        **session,
+                        "root": {"pid": (session.get("root") or {}).get("pid")},
+                        "child_count": len(children),
+                        "children": compact_children,
+                    }
+                )
+            compact_zones.append({**zone, "sessions": sessions})
+
+        return {
+            **{key: value for key, value in snapshot.items() if key != "sessions"},
+            "stream_compact": True,
+            "processes": {**processes, "items": []},
+            "resources": {
+                **resources,
+                "programs": [],
+                "top_cpu": [compact_leader(item) for item in (resources.get("top_cpu") or [])[:5]],
+                "top_memory": [compact_leader(item) for item in (resources.get("top_memory") or [])[:5]],
+                "top_gpu": [compact_leader(item) for item in (resources.get("top_gpu") or [])[:5]],
+                "top_disk": [],
+            },
+            "observability": {
+                **observability,
+                "events": (observability.get("events") or [])[:4],
+            },
+            "zones": compact_zones,
+        }
+
+    def snapshot_json(self, compact: bool = False) -> str:
         with self._lock:
             now = time.monotonic()
-            if self._cached_json and now - self._cached_at < self.refresh_s * 0.8:
-                return self._cached_json
-            procs = self.sampler.snapshot()
-            sessions = build_sessions(procs)
-            self.history.record(sessions)
-            system_metrics = self.telemetry.sample(
-                procs,
-                download_bytes_per_s=self.history.net_recv_per_s,
-                upload_bytes_per_s=self.history.net_sent_per_s,
-            )
-            generated_at = time.time()
-            transitions = self.thresholds.evaluate(system_metrics, timestamp=generated_at)
-            self.store.record_events(transitions)
-            self.store.record_sample(system_metrics, timestamp=generated_at)
-            snapshot = build_snapshot(
-                sessions,
-                procs,
-                self.history,
-                self.extensions,
-                self.refresh_s,
-                system_metrics=system_metrics,
-                observability=self._observability_snapshot(),
-            )
-            self._cached_json = json.dumps(
-                snapshot,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            self._cached_at = now
+            if self._cached_snapshot is None or now - self._cached_at >= self.refresh_s * 0.8:
+                procs = self.sampler.snapshot()
+                sessions = build_sessions(procs)
+                self.history.record(sessions)
+                workload_storage = self.workload_disk.sample(sessions)
+                system_metrics = self.telemetry.sample(
+                    procs,
+                    download_bytes_per_s=self.history.net_recv_per_s,
+                    upload_bytes_per_s=self.history.net_sent_per_s,
+                )
+                generated_at = time.time()
+                transitions = self.thresholds.evaluate(system_metrics, timestamp=generated_at)
+                self.store.record_events(transitions)
+                self.store.record_sample(system_metrics, timestamp=generated_at)
+                if transitions:
+                    self._observability_cached_at = 0.0
+                self._cached_snapshot = build_snapshot(
+                    sessions,
+                    procs,
+                    self.history,
+                    self.extensions,
+                    self.refresh_s,
+                    system_metrics=system_metrics,
+                    observability=self._observability_snapshot(),
+                    workload_storage=workload_storage,
+                )
+                self._cached_json = ""
+                self._cached_stream_json = ""
+                self._cached_at = time.monotonic()
+            if compact:
+                if not self._cached_stream_json:
+                    self._cached_stream_json = json.dumps(
+                        self._compact_snapshot(self._cached_snapshot),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                return self._cached_stream_json
+            if not self._cached_json:
+                self._cached_json = json.dumps(
+                    self._cached_snapshot,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
             return self._cached_json
 
     def process_details(self, pid: int) -> dict:
@@ -211,11 +362,16 @@ class MonitorState:
             return self._observability_snapshot()
 
     def _observability_snapshot(self) -> dict:
+        now = time.monotonic()
+        if self._observability_cache is not None and now - self._observability_cached_at < 30.0:
+            return self._observability_cache
         result = self.thresholds.snapshot()
         if self.store.available:
             result["events"] = self.store.query_events(limit=100)
         result["persistence"] = self.store.status()
         result["history_ranges"] = ["15m", "1h", "6h", "24h", "7d"]
+        self._observability_cache = result
+        self._observability_cached_at = now
         return result
 
     def update_thresholds(self, updates: dict) -> dict:
@@ -223,6 +379,7 @@ class MonitorState:
             values = self.thresholds.update_thresholds(updates)
             persisted = self.store.save_setting("thresholds", values)
             self._cached_at = 0.0
+            self._observability_cached_at = 0.0
             return {"thresholds": values, "persisted": persisted}
 
     def dashboard_preferences(self) -> dict:
@@ -234,9 +391,66 @@ class MonitorState:
 
     def update_dashboard_preferences(self, updates: dict) -> dict:
         current = self.dashboard_preferences()["preferences"]
+        candidate = normalize_dashboard_preferences({**current, **updates})
+        if candidate["provider_quotas"] != current["provider_quotas"]:
+            updates = {**updates, "quota_updated_at": time.time()}
         preferences = normalize_dashboard_preferences({**current, **updates})
         persisted = self.store.save_setting("dashboard_preferences", preferences)
         return {"preferences": preferences, "persisted": persisted}
+
+    def provider_usage(self) -> dict:
+        preferences = self.dashboard_preferences()["preferences"]
+        quotas = preferences["provider_quotas"]
+        provider_meta = (
+            ("claude", "Claude", "claude"),
+            ("chatgpt", "ChatGPT", "codex"),
+            ("cursor", "Cursor", "cursor"),
+        )
+        providers = []
+        for provider_id, display_name, zone_id in provider_meta:
+            values = quotas[provider_id]
+            windows = []
+            for window_id, duration_minutes, key in (
+                ("five_hour", 300, "five_hour_used_percent"),
+                ("weekly", 10080, "weekly_used_percent"),
+            ):
+                used = values[key]
+                windows.append(
+                    {
+                        "id": window_id,
+                        "duration_minutes": duration_minutes,
+                        "used_percent": used,
+                        "remaining_percent": round(100.0 - used, 2) if used is not None else None,
+                        "resets_at": None,
+                    }
+                )
+            available = any(window["used_percent"] is not None for window in windows)
+            providers.append(
+                {
+                    "id": provider_id,
+                    "display_name": display_name,
+                    "workload_zone_id": zone_id,
+                    "status": "available" if available else "unsupported",
+                    "source": {
+                        "kind": "manual_local",
+                        "scope": "subscription",
+                        "authoritative": False,
+                    },
+                    "observed_at": preferences["quota_updated_at"] if available else None,
+                    "stale_after_seconds": None,
+                    "windows": windows,
+                    "reason": (
+                        None
+                        if available
+                        else "No safe programmatic quota source is configured; add local percentages in Settings."
+                    ),
+                }
+            )
+        return {
+            "schema_version": 1,
+            "generated_at": time.time(),
+            "providers": providers,
+        }
 
     def history_snapshot(self, range_key: str) -> dict:
         return self.store.query_history(range_key)
@@ -303,6 +517,9 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/dashboard-preferences":
             self._serve_json(self.monitor_server.state.dashboard_preferences())
             return
+        if parsed.path == "/api/provider-usage":
+            self._serve_json(self.monitor_server.state.provider_usage())
+            return
         if parsed.path == "/api/history":
             query = parse_qs(parsed.query)
             range_key = (query.get("range") or ["1h"])[0]
@@ -341,7 +558,14 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/events":
             query = parse_qs(parsed.query)
-            self._serve_events(once=query.get("once") == ["1"])
+            try:
+                interval_s = float((query.get("interval") or ["3"])[0])
+            except ValueError:
+                interval_s = 3.0
+            self._serve_events(
+                once=query.get("once") == ["1"],
+                interval_s=interval_s,
+            )
             return
         if parsed.path.startswith("/static/"):
             self._serve_static(parsed.path.removeprefix("/static/"))
@@ -514,7 +738,7 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             return
         self._serve_json(result)
 
-    def _serve_events(self, once: bool = False) -> None:
+    def _serve_events(self, once: bool = False, interval_s: float = 3.0) -> None:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
@@ -523,7 +747,7 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
         self.end_headers()
         while True:
             try:
-                payload = self.monitor_server.state.snapshot_json()
+                payload = self.monitor_server.state.snapshot_json(compact=True)
                 self.wfile.write(b"event: snapshot\n")
                 self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                 self.wfile.flush()
@@ -540,7 +764,7 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             if once:
                 self.close_connection = True
                 return
-            time.sleep(self.monitor_server.state.refresh_s)
+            time.sleep(max(self.monitor_server.state.refresh_s, min(10.0, interval_s)))
 
     def _serve_json_error(self, exc: Exception) -> None:
         self._serve_json({"error": str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)

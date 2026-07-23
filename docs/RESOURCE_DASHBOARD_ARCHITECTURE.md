@@ -1,6 +1,6 @@
 # 本地资源看板重构说明
 
-更新日期：2026-07-21
+更新日期：2026-07-22
 
 ## 结论
 
@@ -54,19 +54,29 @@ launchd/systemd 服务、逐进程网络和 Docker/Podman 容器都采用独立�
 
 ### 6. AI 工作负载
 
-Claude、Codex/OpenAI 和 Cursor 的识别、项目归因与会话聚合全部保留。它们现在位于顶部资源卡片之后的可移动专项区块，而不是独立 Tab；和普通系统进程共享采样结果，避免维护两套事实来源。每个工具保留固定身份色，并显示实时 CPU 活动条、短期趋势、项目摘要、会话状态和可展开子进程。
+Claude、ChatGPT 和 Cursor 的识别、项目归因与会话聚合全部保留。它们现在位于顶部资源卡片之后的可移动专项区块，而不是独立 Tab；和普通系统进程共享采样结果，避免维护两套事实来源。每个工具保留固定身份色，并显示实时 CPU 活动条、短期趋势、项目摘要、会话状态和可展开子进程。
+
+工作负载磁盘空间定义为“可归因项目目录的已分配大小”，而不是无法可靠归因到单个进程的整盘占用。后台线程每次只运行一个低优先级 `du` 探测，成功结果缓存 5 分钟，失败结果缓存 1 分钟；只测量当前用户主目录内的路径，超时或不可读时明确降级。
+
+Claude、ChatGPT 与 Cursor 各有独立额度卡。当前安全基线是用户在本机设置 5 小时和每周已用百分比；后端计算剩余百分比，但不读取凭证、Cookie 或非公开服务接口。未配置的窗口显示不可用，不以 0% 伪装真实额度。
 
 ### 7. Compact Dashboard 与偏好设置
 
 Web 看板采用单页渐进披露，不再依赖多个顶层 Tab。CPU、GPU、内存、存储、网络和进程卡片固定在顶部；AI 工作负载、趋势/告警、资源排行榜、进程清单、存储和运行时区块可调整上下顺序。用户可隐藏非必要区块、切换紧凑/舒适密度、控制是否显示空闲 AI provider，并选择进程表字段。
 
-这些偏好通过 `/api/dashboard-preferences` 读写 SQLite settings，刷新页面或重启看板后仍然保留。后端只接受白名单 section/column id，并自动补齐新版本增加的默认区块，避免旧偏好破坏后续布局。
+这些偏好通过 `/api/dashboard-preferences` 读写 SQLite settings，刷新页面或重启看板后仍然保留。统一设置入口同时管理中英文、五种主题、刷新策略和本地额度值。后端只接受白名单 language/theme/performance/section/column id，并自动补齐新版本增加的默认值，避免旧偏好破坏后续布局。
 
 ### 8. 颜色系统
 
 颜色不是按组件随机分配，而是按数据域注册：CPU、GPU、内存、存储、网络、进程、磁盘读写、网络上下行、服务、容器和状态各有独立 token；Claude、Codex、Cursor 使用独立且固定的身份色。JavaScript 图表直接引用 CSS token，不维护第二套十六进制常量。
 
 完整 token、组件映射和验收规则见 [Dashboard Design System](./DASHBOARD_DESIGN_SYSTEM.md)。测试 `tests/test_dashboard_palette.py` 会阻止语义 token 使用重复色值。
+
+### 9. 温度与轻量刷新
+
+CPU 温度优先使用 `psutil` 暴露的 CPU/package/core 传感器，并取当前可读的最高温度；macOS 可选兼容的无特权辅助程序。平台没有安全读取通道时返回 `available: false` 和原因，不调用 `sudo`，也不把系统热压力状态冒充为摄氏温度。
+
+默认平衡模式的 SSE 间隔为 3 秒，另提供 1.5 秒实时模式和 5 秒节能模式。SSE 只推送总览、趋势、AI 工作负载和状态数据；完整进程/程序数组在进程区块接近视口时按需获取。服务、逐进程网络和容器继续使用独立端点，但轮询改为视口可见、页面激活且未暂停时才运行。
 
 ## 模块边界
 
@@ -82,7 +92,7 @@ diskutil/smartctl ──> storage.SmartCollector ───────> normaliz
 samples ───────────> observability.ThresholdEngine ─> transition events
 samples/events ────> persistence.HistoryStore ──────> SQLite WAL / range queries
 
-all normalized data ──> snapshot schema v3 ──> cached SSE / JSON ──> compact web sections
+all normalized data ──> snapshot schema v3 ──> compact cached SSE + full on-demand JSON
 
 selected PID ──────> on-demand detail endpoint
 confirmed action ──> guarded same-user process action endpoint
@@ -96,8 +106,8 @@ runtime adapters ──> launchd/systemd · nettop/sockets · Docker/Podman endp
 - `observability.py` 只负责阈值状态机；`persistence.py` 负责 SQLite schema、保留策略和历史降采样，两者不依赖浏览器。
 - `runtime.py` 封装服务、网络与容器命令适配器，全部具有超时、缓存和明确降级状态。
 - `snapshot.py` 提供 schema v3，同时保留旧版 `cpu_percent` 和 `disk` 别名，降低现有客户端迁移成本。
-- `web.py` 在刷新窗口内缓存快照，避免每个 SSE 客户端重复进行一次全系统采样；详细进程信息独立按需读取；同时对白名单化 Dashboard 偏好进行规范化，并通过 SQLite settings 持久化区块顺序、可见性、密度和表格字段。
-- `web_static` 只消费规范化 JSON，不包含平台判断或系统命令；资源图表引用统一 CSS 语义色，不重复定义颜色常量。
+- `web.py` 在刷新窗口内缓存快照，避免每个 SSE 客户端重复进行一次全系统采样；SSE 使用精简 JSON，完整进程信息独立按需读取；同时对白名单化 Dashboard 偏好进行规范化，并通过 SQLite settings 持久化语言、主题、刷新策略、区块顺序、可见性、密度、额度和表格字段。
+- `web_static` 只消费规范化 JSON，不包含平台判断或系统命令；资源图表引用统一 CSS 语义色，不重复定义颜色常量；视口观察器控制重区块渲染和后台轮询。
 
 ## GPU 可用性约定
 

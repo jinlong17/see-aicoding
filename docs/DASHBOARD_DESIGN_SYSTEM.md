@@ -1,6 +1,6 @@
 # Dashboard design system
 
-Updated: 2026-07-21
+Updated: 2026-07-22
 
 ## Purpose
 
@@ -56,7 +56,7 @@ These are stable identity colors. Do not reassign them to system resources.
 
 | Provider | CSS token | Value |
 |---|---|---:|
-| Codex / OpenAI | `--codex` | `#65d9ae` |
+| ChatGPT | `--codex` | `#65d9ae` |
 | Claude | `--claude` | `#e4a77d` |
 | Cursor | `--cursor` | `#95a8ff` |
 
@@ -91,6 +91,19 @@ and chart registry.
   unavailable; hidden cards do not reserve empty grid space.
 - The default density is `compact`; `comfortable` increases spacing without
   changing information architecture.
+
+## Language and theme contract
+
+- The single Settings entry owns language, theme, density, section, column,
+  refresh, and optional quota preferences; there is no second appearance menu.
+- English and Simplified Chinese use the same DOM and stable semantic values.
+  Language changes labels and locale formatting, never provider or process ids.
+- `light`, `warm`, `mint`, `dark`, and `deep` override neutral surfaces while
+  preserving resource and provider identity tokens.
+- Theme variables are applied before the stylesheet loads when a local cached
+  choice exists, preventing a bright or dark flash during navigation.
+- Mobile controls retain a minimum 44px touch target and dense tables scroll
+  inside their container rather than widening the page.
 
 ## Component hierarchy
 
@@ -134,8 +147,12 @@ git diff --check
 
 - Desktop: all available resource cards fit the intended row and every domain
   color is visibly distinct.
-- AI workloads: Claude, Codex, and Cursor keep their fixed colors; expanding a
+- AI workloads: Claude, ChatGPT, and Cursor keep their fixed colors; expanding a
   session does not leak another provider or system color into the tree.
+- Themes: all five modes keep text, borders, focus rings, charts, and unavailable
+  states legible without changing semantic resource colors.
+- Languages: English and Simplified Chinese fit at desktop and narrow widths
+  without truncating controls or changing metric values.
 - Charts: CPU, memory, GPU, read, and write legend colors match their lines.
 - Runtime: network, service, and container panels have different accents.
 - Alerts: warning, critical, and resolved states remain distinguishable from

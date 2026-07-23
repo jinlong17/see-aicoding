@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CSS_PATH = ROOT / "src" / "see_aicoding" / "web_static" / "app.css"
 JS_PATH = ROOT / "src" / "see_aicoding" / "web_static" / "app.js"
+HTML_PATH = ROOT / "src" / "see_aicoding" / "web_static" / "index.html"
 
 PALETTE_TOKENS = (
     "resource-cpu",
@@ -55,6 +56,28 @@ class DashboardPaletteTests(unittest.TestCase):
             self.assertIn(f'{token}: "var(--resource-{token})"', javascript)
         self.assertIn('read: "var(--io-read)"', javascript)
         self.assertIn('write: "var(--io-write)"', javascript)
+
+    def test_all_theme_and_language_controls_are_shipped(self) -> None:
+        css = CSS_PATH.read_text(encoding="utf-8")
+        javascript = JS_PATH.read_text(encoding="utf-8")
+        html = HTML_PATH.read_text(encoding="utf-8")
+
+        for theme in ("light", "warm", "mint", "dark", "deep"):
+            self.assertIn(f'[data-theme="{theme}"]', css)
+            self.assertIn(f'<option value="{theme}">', html)
+        self.assertIn('<option value="zh-CN">简体中文</option>', html)
+        self.assertIn('const ZH_TEXT = {', javascript)
+        self.assertIn('document.documentElement.lang = state.preferences.language', javascript)
+        self.assertIn('PERFORMANCE_INTERVALS = { realtime: 1.5, balanced: 3, efficient: 5 }', javascript)
+
+    def test_frontend_uses_compact_stream_and_lazy_runtime_polling(self) -> None:
+        javascript = JS_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('new EventSource(`/events?interval=${encodeURIComponent(interval)}`)', javascript)
+        self.assertIn('new IntersectionObserver', javascript)
+        self.assertIn('snapshot.stream_compact', javascript)
+        self.assertNotIn('setInterval(fetchNetworkAttribution, 4000)', javascript)
+        self.assertNotIn('setInterval(fetchContainers, 8000)', javascript)
 
 
 if __name__ == "__main__":

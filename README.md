@@ -4,7 +4,7 @@
 
 **A local system resource dashboard with AI coding workload context.**
 
-Track CPU, GPU, memory, disks, I/O, network, programs, processes, and AI coding workloads from one local-only dashboard. The compact terminal view remains available for focused Claude, Codex, and Cursor monitoring.
+Track CPU, GPU, memory, disks, I/O, network, programs, processes, and AI coding workloads from one local-only dashboard. The compact terminal view remains available for focused Claude, ChatGPT, and Cursor monitoring.
 
 `pip install --user git+https://github.com/jinlong17/see-aicoding.git`
 
@@ -30,7 +30,7 @@ dashboard, semantic color system, and AI workload restoration notes.
 │                                             System memory 13G/16G 84%     │
 │                                             Local storage 436G/460G       │
 ╰─────────────────────────────── AI workload with system context ───────────╯
-╭─ ◆ Claude ─────────────╮╭─ ◆ Codex / OpenAI ───╮╭─ ◆ Cursor IDE ──────────╮
+╭─ ◆ Claude ─────────────╮╭─ ◆ ChatGPT ───────────╮╭─ ◆ Cursor IDE ──────────╮
 │ Processor   14 sessions││ Processor  6 sessions││ Processor    2 sessions│
 │ ███░ 26% capacity    ││ ███████░ 94% capacity││ █████░ 52% capacity  │
 │ Memory 817.6MB         ││ Memory 1.3GB          ││ Memory 1.1GB            │
@@ -69,7 +69,7 @@ When a machine feels slow, the responsible workload is often hidden behind helpe
 
 | Area | What you get |
 |---|---|
-| AI process grouping | Claude Code, Claude Desktop, Codex Desktop, Codex CLI, Cursor, OpenAI extensions, and common helper processes |
+| AI process grouping | Claude Code, Claude Desktop, ChatGPT/Codex, Cursor, ChatGPT extensions, and common helper processes |
 | Project attribution | Project names inferred from cwd, repo markers, and Cursor extension-host process names |
 | Stable ordering | Sessions sort by creation time, so rows do not jump around when CPU changes |
 | Per-project totals | Process count, processor usage, and memory per detected project |
@@ -85,7 +85,10 @@ When a machine feels slow, the responsible workload is often hidden behind helpe
 | Network attribution | macOS per-process byte rates via nettop; connection and endpoint fallback where byte counters are unavailable |
 | Container runtime | Docker/Podman inventory and one-shot CPU, memory, network, block I/O, port, and PID metrics |
 | Guarded process actions | Suspend, resume, or terminate current-user processes with protected PID and same-origin checks |
-| Compact Dashboard | Dense single-page Web layout with movable sections, optional cards, configurable process columns, and SQLite-backed preferences |
+| Compact Dashboard | Dense single-page Web layout with English/Chinese switching, five themes, movable sections, optional cards, configurable process columns, and SQLite-backed preferences |
+| AI quota cards | Separate Claude, ChatGPT, and Cursor cards with truthful unavailable states and optional local 5-hour/weekly usage percentages |
+| Workload storage | Staggered, cached project-directory allocation for each attributed AI workload |
+| CPU temperature | Best-effort CPU package temperature with explicit platform/provider availability |
 | Stable semantic colors | Dedicated colors for resources, I/O directions, runtime domains, alert states, and each AI provider |
 
 ## Install
@@ -183,7 +186,7 @@ in-product confirmation step.
 
 The color system is intentionally semantic: CPU, GPU, memory, storage, network,
 processes, disk I/O, services, containers, and alert states each have a
-dedicated token. Claude, Codex, and Cursor keep stable identity colors across
+dedicated token. Claude, ChatGPT, and Cursor keep stable identity colors across
 their cards, trends, projects, sessions, and child-process rows.
 
 See [the resource dashboard architecture](https://github.com/jinlong17/see-aicoding/blob/main/docs/RESOURCE_DASHBOARD_ARCHITECTURE.md)
@@ -243,7 +246,7 @@ the dashboard silently falls back to process counts.
 | Claude in Cursor / VS Code | `anthropic.claude-code-*` extension paths |
 | Codex Desktop | `/Applications/Codex.app/` and helper process tree |
 | Codex CLI | `@openai/codex`, `~/.codex/`, `codex` executable paths |
-| OpenAI extensions | `openai.chatgpt-*`, `openai.codex-*` |
+| ChatGPT extensions | `openai.chatgpt-*`, `openai.codex-*` |
 | Cursor IDE | `/Applications/Cursor.app/` |
 | Other AI extensions | Copilot, Cline, Continue, Cody, Tabnine, Codeium |
 
@@ -286,7 +289,7 @@ src/see_aicoding/
 Sampling flow:
 
 1. `Sampler.snapshot()` walks the current user's processes for TUI mode and all readable system processes for Web mode.
-2. `classify()` tags each process as Claude, Codex, Cursor, extension, MCP, or child.
+2. `classify()` tags each process as Claude, ChatGPT/Codex, Cursor, extension, MCP, or child.
 3. `build_sessions()` picks root processes and attributes descendants through the parent-process chain.
 4. Project names are inferred from cwd, repo markers, and selected desktop app child processes.
 5. `render_all()` draws the header, three zones, current-user resource watch, footer, sparklines, and extension inventory.
