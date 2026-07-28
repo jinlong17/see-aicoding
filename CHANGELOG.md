@@ -22,8 +22,10 @@
   fields. Identical Claude values are write-deduplicated for one minute.
 - Automatically prefer and validate app-bundled Codex binaries before PATH
   candidates, fall back when an older CLI lacks the required app-server
-  protocol, and distinguish a configured Claude capture that is merely waiting
-  for its first eligible response.
+  protocol, and distinguish a configured Claude Pro/Max capture that is waiting
+  for its first eligible response from a Claude Team plan that supports manual
+  quota values only. The sanitized subscription-type check is cached for 15
+  minutes and never exposes or persists credentials.
 - Added staggered, cached project allocation measurements to AI workload,
   project, and session cards without running `du` on the hot sampling path.
 - Added best-effort CPU temperature reporting with explicit unsupported states.

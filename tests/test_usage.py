@@ -14,6 +14,7 @@ from see_aicoding.usage import (
     UsageSourceError,
     UsageCollector,
     capture_claude_statusline,
+    claude_subscription_information,
     claude_statusline_configuration,
     find_codex_executables,
     normalize_codex_rate_limits,
@@ -248,6 +249,34 @@ class UsageSourceTests(unittest.TestCase):
                 [("five_hour", 20.0), ("weekly", 30.0)],
             )
 
+    def test_claude_subscription_information_reports_team_as_manual_only(self) -> None:
+        completed = mock.Mock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "loggedIn": True,
+                    "authMethod": "claude.ai",
+                    "subscriptionType": "team",
+                    "oauthToken": "must-not-be-returned",
+                }
+            ),
+        )
+        with mock.patch(
+            "see_aicoding.usage.subprocess.run",
+            return_value=completed,
+        ) as run:
+            result = claude_subscription_information("/mock/claude")
+
+        self.assertEqual(result["subscription_type"], "team")
+        self.assertFalse(result["automatic_supported"])
+        self.assertTrue(result["auth_status_available"])
+        self.assertNotIn("oauthToken", result)
+        run.assert_called_once()
+        self.assertEqual(
+            run.call_args.args[0],
+            ["/mock/claude", "auth", "status", "--json"],
+        )
+
     def test_missing_claude_snapshot_reports_configured_waiting_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -268,16 +297,63 @@ class UsageSourceTests(unittest.TestCase):
             )
 
             configuration = claude_statusline_configuration(settings)
-            result = ClaudeStatusLineSource(
-                root / "missing-usage.json",
-                settings,
-            ).collect()
+            with mock.patch(
+                "see_aicoding.usage.claude_subscription_information",
+                return_value={
+                    "subscription_type": "pro",
+                    "automatic_supported": True,
+                    "auth_status_available": True,
+                },
+            ):
+                result = ClaudeStatusLineSource(
+                    root / "missing-usage.json",
+                    settings,
+                ).collect()
 
             self.assertTrue(configuration["configured"])
             self.assertTrue(configuration["uses_absolute_executable"])
             self.assertTrue(result["metadata"]["capture_configured"])
             self.assertTrue(result["metadata"]["waiting_for_first_response"])
+            self.assertTrue(result["metadata"]["automatic_supported"])
             self.assertIn("starts automatically", result["reason"])
+
+    def test_missing_claude_snapshot_reports_team_as_manual_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = root / "settings.json"
+            settings.write_text(
+                json.dumps(
+                    {
+                        "statusLine": {
+                            "type": "command",
+                            "command": (
+                                "/opt/anaconda3/bin/see-aicoding "
+                                "--capture-claude-usage"
+                            ),
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source = ClaudeStatusLineSource(root / "missing-usage.json", settings)
+            with mock.patch(
+                "see_aicoding.usage.claude_subscription_information",
+                return_value={
+                    "subscription_type": "team",
+                    "automatic_supported": False,
+                    "auth_status_available": True,
+                },
+            ) as subscription:
+                first = source.collect()
+                second = source.collect()
+
+            self.assertEqual(first["status"], "unsupported")
+            self.assertEqual(first["metadata"]["subscription_type"], "team")
+            self.assertFalse(first["metadata"]["automatic_supported"])
+            self.assertFalse(first["metadata"]["waiting_for_first_response"])
+            self.assertIn("Pro/Max", first["reason"])
+            self.assertEqual(second["metadata"], first["metadata"])
+            subscription.assert_called_once()
 
     def test_usage_collector_refreshes_off_thread_and_reuses_cache(self) -> None:
         release = mock.Mock()

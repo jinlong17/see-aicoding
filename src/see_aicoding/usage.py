@@ -23,7 +23,10 @@ MAX_RETRY_SECONDS = 600.0
 FORCE_REFRESH_COOLDOWN_SECONDS = 10.0
 CLAUDE_STALE_SECONDS = 24 * 60 * 60
 CLAUDE_WRITE_DEDUP_SECONDS = 60.0
+CLAUDE_AUTH_CACHE_SECONDS = 15 * 60.0
+CLAUDE_AUTH_TIMEOUT_SECONDS = 3.0
 MAX_STATUSLINE_BYTES = 1024 * 1024
+CLAUDE_RATE_LIMIT_SUBSCRIPTIONS = frozenset({"pro", "max"})
 
 _PROVIDER_META = {
     "chatgpt": ("codex_app_server", "active_codex_profile"),
@@ -363,6 +366,84 @@ def default_claude_settings_path() -> Path:
     return Path.home() / ".claude" / "settings.json"
 
 
+def find_claude_executable() -> str | None:
+    """Return the local Claude CLI used only for a sanitized auth-status check."""
+    override = os.environ.get("SEE_AICODING_CLAUDE_BIN")
+    if override:
+        path = Path(override).expanduser()
+        return str(path) if _is_executable_file(path) else None
+
+    candidates = (
+        shutil.which("claude"),
+        str(Path.home() / ".local" / "bin" / "claude"),
+    )
+    for candidate in candidates:
+        if candidate and _is_executable_file(candidate):
+            return candidate
+    return None
+
+
+def claude_subscription_information(
+    executable: str | None = None,
+    *,
+    timeout_seconds: float = CLAUDE_AUTH_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    """Read only the local Claude subscription type, never credentials or tokens."""
+    command = executable or find_claude_executable()
+    if not command:
+        return {
+            "subscription_type": None,
+            "automatic_supported": None,
+            "auth_status_available": False,
+        }
+    try:
+        completed = subprocess.run(
+            [command, "auth", "status", "--json"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=max(0.5, float(timeout_seconds)),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {
+            "subscription_type": None,
+            "automatic_supported": None,
+            "auth_status_available": False,
+        }
+    if completed.returncode != 0 or len(completed.stdout) > 64 * 1024:
+        return {
+            "subscription_type": None,
+            "automatic_supported": None,
+            "auth_status_available": False,
+        }
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        payload = None
+    if not isinstance(payload, dict) or payload.get("loggedIn") is not True:
+        return {
+            "subscription_type": None,
+            "automatic_supported": None,
+            "auth_status_available": False,
+        }
+    subscription_type = payload.get("subscriptionType")
+    if not isinstance(subscription_type, str):
+        subscription_type = None
+    else:
+        subscription_type = subscription_type.strip().lower()[:32] or None
+    return {
+        "subscription_type": subscription_type,
+        "automatic_supported": (
+            subscription_type in CLAUDE_RATE_LIMIT_SUBSCRIPTIONS
+            if subscription_type is not None
+            else None
+        ),
+        "auth_status_available": True,
+    }
+
+
 def claude_statusline_configuration(path: str | Path | None = None) -> dict[str, object]:
     """Inspect whether Claude Code is configured to invoke the safe capture mode."""
     settings_path = (
@@ -427,31 +508,70 @@ class ClaudeStatusLineSource:
             if settings_path is not None
             else default_claude_settings_path()
         )
+        self._subscription_information: dict[str, object] | None = None
+        self._subscription_information_expires = 0.0
+
+    def _cached_subscription_information(self) -> dict[str, object]:
+        now = time.monotonic()
+        if (
+            self._subscription_information is None
+            or now >= self._subscription_information_expires
+        ):
+            self._subscription_information = claude_subscription_information()
+            self._subscription_information_expires = now + CLAUDE_AUTH_CACHE_SECONDS
+        return dict(self._subscription_information)
 
     def collect(self) -> dict[str, object]:
         if not self.path.is_file():
             configuration = claude_statusline_configuration(self.settings_path)
             configured = bool(configuration["configured"])
-            return _provider_result(
-                "claude",
-                "unavailable",
-                reason=(
+            subscription = (
+                self._cached_subscription_information()
+                if configured
+                else {
+                    "subscription_type": None,
+                    "automatic_supported": None,
+                    "auth_status_available": False,
+                }
+            )
+            automatic_supported = subscription.get("automatic_supported")
+            waiting_for_first_response = (
+                configured and automatic_supported is not False
+            )
+            subscription_type = subscription.get("subscription_type")
+            if configured and automatic_supported is False:
+                plan = str(subscription_type or "current").title()
+                reason = (
+                    "Claude status-line rate_limits are supported only for "
+                    f"Pro/Max subscriptions; detected {plan}. "
+                    "Use manual local values in Settings."
+                )
+                status = "unsupported"
+            elif configured:
+                reason = (
                     "Claude quota capture is configured and starts automatically "
                     "in a new Claude Code session after the first eligible response."
-                    if configured
-                    else (
-                        "Claude automatic quota capture is not configured. "
-                        "Set Claude Code statusLine.command to an absolute "
-                        "see-aicoding path with '--capture-claude-usage'."
-                    )
-                ),
+                )
+                status = "unavailable"
+            else:
+                reason = (
+                    "Claude automatic quota capture is not configured. "
+                    "Set Claude Code statusLine.command to an absolute "
+                    "see-aicoding path with '--capture-claude-usage'."
+                )
+                status = "unavailable"
+            return _provider_result(
+                "claude",
+                status,
+                reason=reason,
                 metadata={
                     "capture_configured": configured,
-                    "waiting_for_first_response": configured,
+                    "waiting_for_first_response": waiting_for_first_response,
                     "uses_absolute_executable": configuration.get(
                         "uses_absolute_executable",
                         False,
                     ),
+                    **subscription,
                 },
             )
         try:

@@ -1587,6 +1587,9 @@ function quotaSourceLabel(kind) {
 function quotaProviderStatus(provider) {
   const hasValues = (provider.windows || []).some((windowModel) => windowModel.used_percent !== null && windowModel.used_percent !== undefined);
   if (provider.refreshing && !hasValues) return quotaLocale("Refreshing", "刷新中");
+  if (provider.id === "claude" && provider.metadata?.automatic_supported === false && !hasValues) {
+    return quotaLocale("Manual only", "仅支持手动");
+  }
   if (provider.id === "claude" && provider.metadata?.capture_configured && !hasValues) {
     return quotaLocale("Waiting", "等待回复");
   }
@@ -1605,6 +1608,14 @@ function quotaProviderNote(provider) {
   }
   if (provider.manual_fallback) return quotaLocale("Manual local fallback", "本地手动后备");
   if (provider.id === "claude") {
+    if (provider.metadata?.automatic_supported === false) {
+      const plan = String(provider.metadata?.subscription_type || "current");
+      const planLabel = `${plan.charAt(0).toUpperCase()}${plan.slice(1)}`;
+      return quotaLocale(
+        `${planLabel} plan · no supported automatic quota source`,
+        `${planLabel} 方案 · 无受支持的自动额度源`,
+      );
+    }
     if (provider.metadata?.capture_configured) {
       return quotaLocale(
         "Configured · waiting for a new Claude response",

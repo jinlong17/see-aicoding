@@ -215,8 +215,13 @@ cached result. No separate quota daemon or startup command is required:
   explicit `SEE_AICODING_CODEX_BIN` remains available as an override. The
   collector reads `account/rateLimits/read` for the currently active Codex
   profile and does not inspect or copy credentials, cookies, or account files.
-- **Claude:** Claude Code must be explicitly configured to send its official
-  status-line JSON to the capture command below. The capture file contains only
+- **Claude:** Claude Code Pro/Max can be explicitly configured to send its
+  official status-line JSON to the capture command below. When that command is
+  configured and no snapshot exists, the collector runs the local
+  `claude auth status --json` command and retains only the subscription type in
+  a 15-minute memory cache. Team and other non-Pro/Max plans are shown as
+  manual-only instead of waiting indefinitely. `SEE_AICODING_CLAUDE_BIN` can
+  override CLI discovery when needed. The capture file contains only
   `five_hour` / `seven_day` usage percentages, reset timestamps, and capture
   time; it is written atomically with user-only permissions. Identical
   status-line values are written at most once per minute to limit disk churn.
@@ -237,12 +242,16 @@ does not depend on its inherited PATH:
 }
 ```
 
-Claude supplies rate-limit fields only for eligible Claude.ai subscription
-sessions and may omit them until the first assistant response. The dashboard
-detects an existing status-line configuration and reports that it is waiting,
-rather than incorrectly claiming it is unconfigured. A missing field does not
-erase the last good local snapshot. Automatic values take precedence; Settings
-values fill only quota windows that the automatic source did not return.
+Claude supplies status-line `rate_limits` only for Claude.ai Pro/Max sessions
+and may omit them until the first API response. The dashboard detects the local
+subscription automatically: Pro/Max with the command configured reports that
+it is waiting for the first eligible response, while Team reports **Manual
+only** because the supported field is not supplied for that plan. This auth
+status check runs on the independent quota worker, has a 3-second timeout, is
+cached for 15 minutes, and neither returns nor persists credentials. A missing
+field does not erase the last good local snapshot. Automatic values take
+precedence; Settings values fill only quota windows that the automatic source
+did not return.
 
 See [the resource dashboard architecture](https://github.com/jinlong17/see-aicoding/blob/main/docs/RESOURCE_DASHBOARD_ARCHITECTURE.md)
 for the research basis, module boundaries, GPU availability contract, and

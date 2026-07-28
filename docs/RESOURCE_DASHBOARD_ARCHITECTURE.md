@@ -58,7 +58,7 @@ Claude、ChatGPT 和 Cursor 的识别、项目归因与会话聚合全部保留�
 
 工作负载磁盘空间定义为“可归因项目目录的已分配大小”，而不是无法可靠归因到单个进程的整盘占用。后台线程每次只运行一个低优先级 `du` 探测，成功结果缓存 5 分钟，失败结果缓存 1 分钟；只测量当前用户主目录内的路径，超时或不可读时明确降级。
 
-Claude、ChatGPT 与 Cursor 各有独立额度卡。ChatGPT 通过本机 `codex app-server` 的 `account/rateLimits/read` 读取当前活动 Codex profile；自动选择时优先验证 ChatGPT.app/Codex.app 内置 Codex，再尝试 PATH 候选，避免旧版 NVM/global CLI 遮蔽兼容版本，验证成功后缓存该选择。Claude 仅在用户明确把 `see-aicoding --capture-claude-usage` 配置为 Claude Code status-line 命令后，接收官方 status-line JSON 中的 `five_hour` / `seven_day` 字段。采集器只保存百分比、重置时间和采集时间，不读取或复制凭证、Cookie、session id；相同 status-line 值一分钟内不重复落盘。Cursor 没有假定非公开的个人接口，继续使用手动值或显示不可用。
+Claude、ChatGPT 与 Cursor 各有独立额度卡。ChatGPT 通过本机 `codex app-server` 的 `account/rateLimits/read` 读取当前活动 Codex profile；自动选择时优先验证 ChatGPT.app/Codex.app 内置 Codex，再尝试 PATH 候选，避免旧版 NVM/global CLI 遮蔽兼容版本，验证成功后缓存该选择。Claude 仅在用户明确把 `see-aicoding --capture-claude-usage` 配置为 Claude Code status-line 命令后，接收官方 status-line JSON 中的 `five_hour` / `seven_day` 字段。根据 Claude Code 官方字段契约，`rate_limits` 只在 Claude.ai Pro/Max 首次 API 响应后提供；看板会通过本地 `claude auth status --json` 自动识别订阅类型，Team 等非 Pro/Max 方案明确显示“仅支持手动”，不会无限显示等待。该检测只保留订阅类型，3 秒超时并在内存缓存 15 分钟。采集器只保存百分比、重置时间和采集时间，不读取或复制凭证、Cookie、session id；相同 status-line 值一分钟内不重复落盘。Cursor 没有假定非公开的个人接口，继续使用手动值或显示不可用。
 
 额度采集在独立守护线程中运行，不进入系统资源热循环：正常缓存 5 分钟，单次本地请求超时 8 秒，失败从 30 秒指数退避到最长 10 分钟，手动刷新具有 10 秒冷却。`/api/provider-usage` 始终立即返回当前安全缓存；自动值优先，手动值只填补自动数据缺失的窗口。未配置的窗口显示不可用，不以 0% 伪装真实额度。
 
