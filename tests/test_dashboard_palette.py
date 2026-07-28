@@ -108,7 +108,8 @@ class DashboardPaletteTests(unittest.TestCase):
         self.assertIn("next_refresh_at: Date.now() / 1000 + retrySeconds", javascript)
         self.assertIn('aria-valuetext="${quotaLocale("Unavailable", "不可用")}"', javascript)
         self.assertIn('return quotaLocale("Manual only", "仅支持手动")', javascript)
-        self.assertIn('return quotaLocale("Waiting", "等待回复")', javascript)
+        self.assertIn('quotaLocale("Waiting", "等待回复")', javascript)
+        self.assertIn('quotaLocale("CLI not run", "CLI 未运行")', javascript)
 
 
 if __name__ == "__main__":

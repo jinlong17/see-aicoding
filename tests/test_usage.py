@@ -169,7 +169,17 @@ class UsageSourceTests(unittest.TestCase):
 
             payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(summary, "Claude limits · 5h 12.25% · 7d 44%")
-            self.assertEqual(set(payload), {"schema_version", "captured_at", "rate_limits"})
+            self.assertEqual(
+                set(payload),
+                {
+                    "schema_version",
+                    "captured_at",
+                    "last_invoked_at",
+                    "invocations",
+                    "responses_seen",
+                    "rate_limits",
+                },
+            )
             self.assertNotIn("oauth_token", path.read_text(encoding="utf-8"))
             self.assertEqual(
                 payload["rate_limits"],
@@ -186,15 +196,63 @@ class UsageSourceTests(unittest.TestCase):
             )
             self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
 
-    def test_empty_claude_statusline_does_not_replace_last_good_snapshot(self) -> None:
+    def test_empty_claude_statusline_keeps_quota_and_records_a_heartbeat(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "claude-usage.json"
-            path.write_text('{"last":"good"}', encoding="utf-8")
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "captured_at": 1000,
+                        "last_invoked_at": 1000,
+                        "invocations": 1,
+                        "responses_seen": 1,
+                        "rate_limits": {"five_hour": {"used_percentage": 12.0}},
+                    }
+                ),
+                encoding="utf-8",
+            )
 
-            summary = capture_claude_statusline({"rate_limits": None}, path)
+            with mock.patch("see_aicoding.usage.time.time", return_value=2000):
+                summary = capture_claude_statusline(
+                    {"rate_limits": None, "cost": {"total_api_duration_ms": 900}},
+                    path,
+                )
 
+            payload = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(summary, "Claude limits · waiting for first response")
-            self.assertEqual(path.read_text(encoding="utf-8"), '{"last":"good"}')
+            self.assertEqual(payload["rate_limits"], {"five_hour": {"used_percentage": 12.0}})
+            self.assertEqual(payload["captured_at"], 1000)
+            self.assertEqual(payload["last_invoked_at"], 2000)
+            self.assertEqual(payload["invocations"], 2)
+            self.assertEqual(payload["responses_seen"], 2)
+
+    def test_first_statusline_run_without_rate_limits_still_creates_a_heartbeat(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "claude-usage.json"
+
+            summary = capture_claude_statusline({"model": {"display_name": "Opus"}}, path)
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(summary, "Claude limits · waiting for first response")
+            self.assertEqual(payload["rate_limits"], {})
+            self.assertNotIn("captured_at", payload)
+            self.assertEqual(payload["invocations"], 1)
+            self.assertEqual(payload["responses_seen"], 0)
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    def test_heartbeat_counts_a_response_only_once_per_write_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "claude-usage.json"
+            payload = {"context_window": {"current_usage": {"input_tokens": 10}}}
+            for moment in (1000, 1030, 1061):
+                with mock.patch("see_aicoding.usage.time.time", return_value=moment):
+                    capture_claude_statusline(payload, path)
+
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(snapshot["invocations"], 2)
+            self.assertEqual(snapshot["responses_seen"], 2)
+            self.assertEqual(snapshot["last_invoked_at"], 1061)
 
     def test_identical_claude_snapshot_writes_at_most_once_per_minute(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -249,7 +307,7 @@ class UsageSourceTests(unittest.TestCase):
                 [("five_hour", 20.0), ("weekly", 30.0)],
             )
 
-    def test_claude_subscription_information_reports_team_as_manual_only(self) -> None:
+    def test_claude_subscription_information_reports_the_plan_without_a_verdict(self) -> None:
         completed = mock.Mock(
             returncode=0,
             stdout=json.dumps(
@@ -268,8 +326,9 @@ class UsageSourceTests(unittest.TestCase):
             result = claude_subscription_information("/mock/claude")
 
         self.assertEqual(result["subscription_type"], "team")
-        self.assertFalse(result["automatic_supported"])
         self.assertTrue(result["auth_status_available"])
+        # The plan alone never decides support; only observed responses can.
+        self.assertNotIn("automatic_supported", result)
         self.assertNotIn("oauthToken", result)
         run.assert_called_once()
         self.assertEqual(
@@ -277,83 +336,113 @@ class UsageSourceTests(unittest.TestCase):
             ["/mock/claude", "auth", "status", "--json"],
         )
 
-    def test_missing_claude_snapshot_reports_configured_waiting_state(self) -> None:
+    @staticmethod
+    def _configured_settings(root: Path) -> Path:
+        settings = root / "settings.json"
+        settings.write_text(
+            json.dumps(
+                {
+                    "statusLine": {
+                        "type": "command",
+                        "command": (
+                            "/opt/anaconda3/bin/see-aicoding --capture-claude-usage"
+                        ),
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        return settings
+
+    def test_missing_claude_snapshot_reports_the_status_line_never_ran(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            settings = root / "settings.json"
-            settings.write_text(
-                json.dumps(
-                    {
-                        "statusLine": {
-                            "type": "command",
-                            "command": (
-                                "/opt/anaconda3/bin/see-aicoding "
-                                "--capture-claude-usage"
-                            ),
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
+            settings = self._configured_settings(root)
 
             configuration = claude_statusline_configuration(settings)
-            with mock.patch(
-                "see_aicoding.usage.claude_subscription_information",
-                return_value={
-                    "subscription_type": "pro",
-                    "automatic_supported": True,
-                    "auth_status_available": True,
-                },
-            ):
-                result = ClaudeStatusLineSource(
-                    root / "missing-usage.json",
-                    settings,
-                ).collect()
-
-            self.assertTrue(configuration["configured"])
-            self.assertTrue(configuration["uses_absolute_executable"])
-            self.assertTrue(result["metadata"]["capture_configured"])
-            self.assertTrue(result["metadata"]["waiting_for_first_response"])
-            self.assertTrue(result["metadata"]["automatic_supported"])
-            self.assertIn("starts automatically", result["reason"])
-
-    def test_missing_claude_snapshot_reports_team_as_manual_only(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            settings = root / "settings.json"
-            settings.write_text(
-                json.dumps(
-                    {
-                        "statusLine": {
-                            "type": "command",
-                            "command": (
-                                "/opt/anaconda3/bin/see-aicoding "
-                                "--capture-claude-usage"
-                            ),
-                        }
-                    }
-                ),
-                encoding="utf-8",
-            )
             source = ClaudeStatusLineSource(root / "missing-usage.json", settings)
             with mock.patch(
                 "see_aicoding.usage.claude_subscription_information",
                 return_value={
                     "subscription_type": "team",
-                    "automatic_supported": False,
                     "auth_status_available": True,
                 },
             ) as subscription:
                 first = source.collect()
                 second = source.collect()
 
-            self.assertEqual(first["status"], "unsupported")
-            self.assertEqual(first["metadata"]["subscription_type"], "team")
-            self.assertFalse(first["metadata"]["automatic_supported"])
-            self.assertFalse(first["metadata"]["waiting_for_first_response"])
-            self.assertIn("Pro/Max", first["reason"])
+            self.assertTrue(configuration["configured"])
+            self.assertTrue(configuration["uses_absolute_executable"])
+            self.assertEqual(first["status"], "unavailable")
+            self.assertTrue(first["metadata"]["capture_configured"])
+            self.assertFalse(first["metadata"]["statusline_invoked"])
+            self.assertEqual(first["metadata"]["statusline_invocations"], 0)
+            # A Team plan alone must not be reported as unsupported.
+            self.assertIsNone(first["metadata"]["automatic_supported"])
+            self.assertTrue(first["metadata"]["waiting_for_first_response"])
+            self.assertIn("Claude Desktop", first["reason"])
             self.assertEqual(second["metadata"], first["metadata"])
             subscription.assert_called_once()
+
+    def test_heartbeat_without_responses_still_waits_for_the_first_reply(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = self._configured_settings(root)
+            path = root / "claude-usage.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "last_invoked_at": time.time(),
+                        "invocations": 4,
+                        "responses_seen": 1,
+                        "rate_limits": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch(
+                "see_aicoding.usage.claude_subscription_information",
+                return_value={"subscription_type": "team", "auth_status_available": True},
+            ):
+                result = ClaudeStatusLineSource(path, settings).collect()
+
+            self.assertEqual(result["status"], "unavailable")
+            self.assertTrue(result["metadata"]["statusline_invoked"])
+            self.assertEqual(result["metadata"]["statusline_invocations"], 4)
+            self.assertIsNone(result["metadata"]["automatic_supported"])
+            self.assertIn("has not returned an API response", result["reason"])
+
+    def test_responses_without_rate_limits_report_the_account_as_unsupported(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = self._configured_settings(root)
+            path = root / "claude-usage.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "last_invoked_at": time.time(),
+                        "invocations": 9,
+                        "responses_seen": 6,
+                        "rate_limits": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch(
+                "see_aicoding.usage.claude_subscription_information",
+                return_value={"subscription_type": "team", "auth_status_available": True},
+            ):
+                result = ClaudeStatusLineSource(path, settings).collect()
+
+            self.assertEqual(result["status"], "unsupported")
+            self.assertFalse(result["metadata"]["automatic_supported"])
+            self.assertFalse(result["metadata"]["waiting_for_first_response"])
+            self.assertEqual(result["metadata"]["statusline_responses_seen"], 6)
+            self.assertIn("Team plan", result["reason"])
 
     def test_usage_collector_refreshes_off_thread_and_reuses_cache(self) -> None:
         release = mock.Mock()

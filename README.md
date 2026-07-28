@@ -215,16 +215,18 @@ cached result. No separate quota daemon or startup command is required:
   explicit `SEE_AICODING_CODEX_BIN` remains available as an override. The
   collector reads `account/rateLimits/read` for the currently active Codex
   profile and does not inspect or copy credentials, cookies, or account files.
-- **Claude:** Claude Code Pro/Max can be explicitly configured to send its
-  official status-line JSON to the capture command below. When that command is
-  configured and no snapshot exists, the collector runs the local
+- **Claude:** Claude Code can be explicitly configured to send its official
+  status-line JSON to the capture command below. Every status-line run is
+  recorded, even one that carries no `rate_limits`, so the dashboard can tell
+  "the command has never run" apart from "the account never reports quota".
+  When no quota has been captured, the collector also runs the local
   `claude auth status --json` command and retains only the subscription type in
-  a 15-minute memory cache. Team and other non-Pro/Max plans are shown as
-  manual-only instead of waiting indefinitely. `SEE_AICODING_CLAUDE_BIN` can
-  override CLI discovery when needed. The capture file contains only
-  `five_hour` / `seven_day` usage percentages, reset timestamps, and capture
-  time; it is written atomically with user-only permissions. Identical
-  status-line values are written at most once per minute to limit disk churn.
+  a 15-minute memory cache, purely to name the plan in the status text;
+  `SEE_AICODING_CLAUDE_BIN` can override CLI discovery when needed. The capture
+  file contains only `five_hour` / `seven_day` usage percentages, reset
+  timestamps, capture time, and run counters; it is written atomically with
+  user-only permissions. Heartbeat and identical status-line values are written
+  at most once per minute to limit disk churn.
 - **Cursor:** no supported personal quota source is assumed. Cursor remains
   unavailable unless manual percentages are entered in Settings; no browser
   scraping, cookie access, or private API is used.
@@ -242,16 +244,26 @@ does not depend on its inherited PATH:
 }
 ```
 
-Claude supplies status-line `rate_limits` only for Claude.ai Pro/Max sessions
-and may omit them until the first API response. The dashboard detects the local
-subscription automatically: Pro/Max with the command configured reports that
-it is waiting for the first eligible response, while Team reports **Manual
-only** because the supported field is not supplied for that plan. This auth
-status check runs on the independent quota worker, has a 3-second timeout, is
-cached for 15 minutes, and neither returns nor persists credentials. A missing
-field does not erase the last good local snapshot. Automatic values take
-precedence; Settings values fill only quota windows that the automatic source
-did not return.
+Claude Code fills `rate_limits` from API response headers, so the field is
+absent until the first response of a session and stays absent for API-key,
+Bedrock, and Vertex sessions. Only Claude Code itself runs this command:
+**Claude Desktop does not execute Claude Code `statusLine`**, so a desktop-only
+setup never produces a snapshot. The dashboard reports the three cases
+separately:
+
+| Claude card | Meaning |
+| --- | --- |
+| **CLI not run** | The command is configured but has never been invoked. Run `claude` in a terminal. |
+| **Waiting** | The status line ran, but no API response with quota has arrived yet. |
+| **Manual only** | Repeated responses returned no `rate_limits`, so this account does not publish quota. |
+
+The **Manual only** verdict is reached from observed responses, never from the
+plan name alone; the subscription type is read only to name the plan in the
+status text. That auth status check runs on the independent quota worker, has a
+3-second timeout, is cached for 15 minutes, and neither returns nor persists
+credentials. A missing field does not erase the last good local snapshot.
+Automatic values take precedence; Settings values fill only quota windows that
+the automatic source did not return.
 
 See [the resource dashboard architecture](https://github.com/jinlong17/see-aicoding/blob/main/docs/RESOURCE_DASHBOARD_ARCHITECTURE.md)
 for the research basis, module boundaries, GPU availability contract, and

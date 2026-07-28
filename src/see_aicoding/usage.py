@@ -26,7 +26,10 @@ CLAUDE_WRITE_DEDUP_SECONDS = 60.0
 CLAUDE_AUTH_CACHE_SECONDS = 15 * 60.0
 CLAUDE_AUTH_TIMEOUT_SECONDS = 3.0
 MAX_STATUSLINE_BYTES = 1024 * 1024
-CLAUDE_RATE_LIMIT_SUBSCRIPTIONS = frozenset({"pro", "max"})
+CLAUDE_SNAPSHOT_SCHEMA_VERSION = 2
+# Claude Code only fills rate_limits from response headers, so "no rate limits"
+# is only meaningful once the status line has seen completed API responses.
+CLAUDE_RESPONSE_EVIDENCE_THRESHOLD = 2
 
 _PROVIDER_META = {
     "chatgpt": ("codex_app_server", "active_codex_profile"),
@@ -383,6 +386,12 @@ def find_claude_executable() -> str | None:
     return None
 
 
+_UNKNOWN_SUBSCRIPTION: dict[str, object] = {
+    "subscription_type": None,
+    "auth_status_available": False,
+}
+
+
 def claude_subscription_information(
     executable: str | None = None,
     *,
@@ -391,11 +400,7 @@ def claude_subscription_information(
     """Read only the local Claude subscription type, never credentials or tokens."""
     command = executable or find_claude_executable()
     if not command:
-        return {
-            "subscription_type": None,
-            "automatic_supported": None,
-            "auth_status_available": False,
-        }
+        return dict(_UNKNOWN_SUBSCRIPTION)
     try:
         completed = subprocess.run(
             [command, "auth", "status", "--json"],
@@ -407,27 +412,15 @@ def claude_subscription_information(
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return {
-            "subscription_type": None,
-            "automatic_supported": None,
-            "auth_status_available": False,
-        }
+        return dict(_UNKNOWN_SUBSCRIPTION)
     if completed.returncode != 0 or len(completed.stdout) > 64 * 1024:
-        return {
-            "subscription_type": None,
-            "automatic_supported": None,
-            "auth_status_available": False,
-        }
+        return dict(_UNKNOWN_SUBSCRIPTION)
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError:
         payload = None
     if not isinstance(payload, dict) or payload.get("loggedIn") is not True:
-        return {
-            "subscription_type": None,
-            "automatic_supported": None,
-            "auth_status_available": False,
-        }
+        return dict(_UNKNOWN_SUBSCRIPTION)
     subscription_type = payload.get("subscriptionType")
     if not isinstance(subscription_type, str):
         subscription_type = None
@@ -435,11 +428,6 @@ def claude_subscription_information(
         subscription_type = subscription_type.strip().lower()[:32] or None
     return {
         "subscription_type": subscription_type,
-        "automatic_supported": (
-            subscription_type in CLAUDE_RATE_LIMIT_SUBSCRIPTIONS
-            if subscription_type is not None
-            else None
-        ),
         "auth_status_available": True,
     }
 
@@ -472,6 +460,36 @@ def claude_statusline_configuration(path: str | Path | None = None) -> dict[str,
         "configured": configured,
         "settings_path": str(settings_path),
         "uses_absolute_executable": bool(arguments and Path(arguments[0]).is_absolute()),
+    }
+
+
+def _counter(value: object) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, result)
+
+
+def _snapshot_activity(snapshot: dict[str, object] | None) -> dict[str, object]:
+    """Summarize how often the status line ran and what it observed."""
+    if snapshot is None:
+        return {
+            "statusline_invoked": False,
+            "statusline_invocations": 0,
+            "statusline_responses_seen": 0,
+            "last_invoked_at": None,
+        }
+    # A schema v1 snapshot has no counters but its existence proves one run.
+    invocations = _counter(snapshot.get("invocations")) or 1
+    return {
+        "statusline_invoked": True,
+        "statusline_invocations": invocations,
+        "statusline_responses_seen": _counter(snapshot.get("responses_seen")),
+        "last_invoked_at": (
+            _timestamp(snapshot.get("last_invoked_at"))
+            or _timestamp(snapshot.get("captured_at"))
+        ),
     }
 
 
@@ -521,59 +539,76 @@ class ClaudeStatusLineSource:
             self._subscription_information_expires = now + CLAUDE_AUTH_CACHE_SECONDS
         return dict(self._subscription_information)
 
+    def _without_rate_limits(
+        self,
+        snapshot: dict[str, object] | None,
+    ) -> dict[str, object]:
+        """Explain which of the three no-data states the local setup is in."""
+        configuration = claude_statusline_configuration(self.settings_path)
+        configured = bool(configuration["configured"])
+        activity = _snapshot_activity(snapshot)
+        subscription = (
+            self._cached_subscription_information()
+            if configured
+            else dict(_UNKNOWN_SUBSCRIPTION)
+        )
+        plan = subscription.get("subscription_type")
+        plan_label = str(plan).title() if isinstance(plan, str) and plan else None
+        invoked = bool(activity["statusline_invoked"])
+        responses_seen = int(activity["statusline_responses_seen"])
+        # Only responses actually seen by the status line can rule the plan out;
+        # Claude Code fills rate_limits from response headers, not from the plan.
+        proven_absent = invoked and responses_seen >= CLAUDE_RESPONSE_EVIDENCE_THRESHOLD
+
+        if not configured:
+            status = "unavailable"
+            reason = (
+                "Claude automatic quota capture is not configured. "
+                "Set Claude Code statusLine.command to an absolute "
+                "see-aicoding path with '--capture-claude-usage'."
+            )
+        elif not invoked:
+            status = "unavailable"
+            reason = (
+                "Claude Code has never run the configured status-line command. "
+                "Claude Desktop does not execute Claude Code statusLine; run the "
+                "'claude' CLI in a terminal and send one message."
+            )
+        elif not proven_absent:
+            status = "unavailable"
+            reason = (
+                "The status line has run but Claude Code has not returned an API "
+                "response with rate limits yet. Quota appears after the first "
+                "reply of a Claude Code CLI session."
+            )
+        else:
+            status = "unsupported"
+            reason = (
+                f"Claude Code returned {responses_seen} responses without "
+                "rate_limits, so this account does not publish subscription "
+                f"quota{f' on the {plan_label} plan' if plan_label else ''}. "
+                "Use manual local values in Settings."
+            )
+        return _provider_result(
+            "claude",
+            status,
+            reason=reason,
+            metadata={
+                "capture_configured": configured,
+                "waiting_for_first_response": configured and not proven_absent,
+                "automatic_supported": False if proven_absent else None,
+                "uses_absolute_executable": configuration.get(
+                    "uses_absolute_executable",
+                    False,
+                ),
+                **activity,
+                **subscription,
+            },
+        )
+
     def collect(self) -> dict[str, object]:
         if not self.path.is_file():
-            configuration = claude_statusline_configuration(self.settings_path)
-            configured = bool(configuration["configured"])
-            subscription = (
-                self._cached_subscription_information()
-                if configured
-                else {
-                    "subscription_type": None,
-                    "automatic_supported": None,
-                    "auth_status_available": False,
-                }
-            )
-            automatic_supported = subscription.get("automatic_supported")
-            waiting_for_first_response = (
-                configured and automatic_supported is not False
-            )
-            subscription_type = subscription.get("subscription_type")
-            if configured and automatic_supported is False:
-                plan = str(subscription_type or "current").title()
-                reason = (
-                    "Claude status-line rate_limits are supported only for "
-                    f"Pro/Max subscriptions; detected {plan}. "
-                    "Use manual local values in Settings."
-                )
-                status = "unsupported"
-            elif configured:
-                reason = (
-                    "Claude quota capture is configured and starts automatically "
-                    "in a new Claude Code session after the first eligible response."
-                )
-                status = "unavailable"
-            else:
-                reason = (
-                    "Claude automatic quota capture is not configured. "
-                    "Set Claude Code statusLine.command to an absolute "
-                    "see-aicoding path with '--capture-claude-usage'."
-                )
-                status = "unavailable"
-            return _provider_result(
-                "claude",
-                status,
-                reason=reason,
-                metadata={
-                    "capture_configured": configured,
-                    "waiting_for_first_response": waiting_for_first_response,
-                    "uses_absolute_executable": configuration.get(
-                        "uses_absolute_executable",
-                        False,
-                    ),
-                    **subscription,
-                },
-            )
+            return self._without_rate_limits(None)
         try:
             if self.path.stat().st_size > 64 * 1024:
                 raise UsageSourceError("Claude quota snapshot is unexpectedly large.")
@@ -594,11 +629,7 @@ class ClaudeStatusLineSource:
         ]
         observed_at = _timestamp(payload.get("captured_at"))
         if not windows or observed_at is None:
-            return _provider_result(
-                "claude",
-                "unavailable",
-                reason="Claude has not supplied subscription rate limits in this session yet.",
-            )
+            return self._without_rate_limits(payload)
         age = max(0.0, time.time() - observed_at)
         stale = age > CLAUDE_STALE_SECONDS
         return _provider_result(
@@ -612,6 +643,12 @@ class ClaudeStatusLineSource:
                 if stale
                 else None
             ),
+            metadata={
+                "capture_configured": True,
+                "waiting_for_first_response": False,
+                "automatic_supported": True,
+                **_snapshot_activity(payload),
+            },
         )
 
 
@@ -636,38 +673,82 @@ def _safe_claude_rate_limits(payload: object) -> dict[str, dict[str, float]]:
     return result
 
 
+def _statusline_saw_api_response(payload: object) -> bool:
+    """Detect whether Claude Code had already completed an API response."""
+    if not isinstance(payload, dict):
+        return False
+    context_window = payload.get("context_window")
+    if isinstance(context_window, dict) and isinstance(
+        context_window.get("current_usage"),
+        dict,
+    ):
+        return True
+    cost = payload.get("cost")
+    if isinstance(cost, dict):
+        try:
+            return float(cost.get("total_api_duration_ms")) > 0
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _read_claude_snapshot(destination: Path) -> dict[str, object]:
+    try:
+        if destination.stat().st_size > 64 * 1024:
+            return {}
+        existing = json.loads(destination.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+    return existing if isinstance(existing, dict) else {}
+
+
 def capture_claude_statusline(payload: object, path: str | Path | None = None) -> str:
-    """Persist only Claude's public status-line rate-limit fields and return display text."""
+    """Record every status-line run and persist only Claude's public rate-limit fields."""
     rate_limits = _safe_claude_rate_limits(payload)
     parts = []
     if "five_hour" in rate_limits:
         parts.append(f"5h {rate_limits['five_hour']['used_percentage']:g}%")
     if "seven_day" in rate_limits:
         parts.append(f"7d {rate_limits['seven_day']['used_percentage']:g}%")
-    if not rate_limits:
-        return "Claude limits · waiting for first response"
+    summary = (
+        "Claude limits · " + " · ".join(parts)
+        if rate_limits
+        else "Claude limits · waiting for first response"
+    )
 
     destination = Path(path).expanduser() if path is not None else default_claude_usage_path()
     now = time.time()
-    try:
-        if destination.stat().st_size <= 64 * 1024:
-            existing = json.loads(destination.read_text(encoding="utf-8"))
-            existing_at = _timestamp(existing.get("captured_at")) if isinstance(existing, dict) else None
-            if (
-                isinstance(existing, dict)
-                and existing.get("rate_limits") == rate_limits
-                and existing_at is not None
-                and now - existing_at < CLAUDE_WRITE_DEDUP_SECONDS
-            ):
-                return "Claude limits · " + " · ".join(parts)
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        pass
+    existing = _read_claude_snapshot(destination)
+    previous_limits = existing.get("rate_limits")
+    previous_limits = previous_limits if isinstance(previous_limits, dict) else {}
+    last_invoked_at = (
+        _timestamp(existing.get("last_invoked_at"))
+        or _timestamp(existing.get("captured_at"))
+    )
+    # New quota values land immediately; heartbeat-only runs stay throttled so a
+    # status line that fires on every render does not thrash the disk.
+    if (
+        last_invoked_at is not None
+        and now - last_invoked_at < CLAUDE_WRITE_DEDUP_SECONDS
+        and (not rate_limits or rate_limits == previous_limits)
+    ):
+        return summary
+
     destination.parent.mkdir(parents=True, exist_ok=True)
-    snapshot = {
-        "schema_version": 1,
-        "captured_at": now,
-        "rate_limits": rate_limits,
+    snapshot: dict[str, object] = {
+        "schema_version": CLAUDE_SNAPSHOT_SCHEMA_VERSION,
+        "last_invoked_at": now,
+        "invocations": _counter(existing.get("invocations")) + 1,
+        "responses_seen": (
+            _counter(existing.get("responses_seen"))
+            + (1 if _statusline_saw_api_response(payload) else 0)
+        ),
+        "rate_limits": rate_limits or previous_limits,
     }
+    # Keep the moment the quota itself was read; a heartbeat must not age it.
+    captured_at = now if rate_limits else _timestamp(existing.get("captured_at"))
+    if captured_at is not None:
+        snapshot["captured_at"] = captured_at
     temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
     descriptor: int | None = None
     try:
@@ -689,7 +770,7 @@ def capture_claude_statusline(payload: object, path: str | Path | None = None) -
             temporary.unlink()
         except FileNotFoundError:
             pass
-    return "Claude limits · " + " · ".join(parts)
+    return summary
 
 
 class UsageCollector:

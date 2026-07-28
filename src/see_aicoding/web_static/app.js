@@ -1591,7 +1591,9 @@ function quotaProviderStatus(provider) {
     return quotaLocale("Manual only", "仅支持手动");
   }
   if (provider.id === "claude" && provider.metadata?.capture_configured && !hasValues) {
-    return quotaLocale("Waiting", "等待回复");
+    return provider.metadata?.statusline_invoked
+      ? quotaLocale("Waiting", "等待回复")
+      : quotaLocale("CLI not run", "CLI 未运行");
   }
   if (provider.status === "stale") return quotaLocale("Stale", "数据已过期");
   if (provider.automatic_available) return quotaLocale("Automatic", "自动更新");
@@ -1611,9 +1613,16 @@ function quotaProviderNote(provider) {
     if (provider.metadata?.automatic_supported === false) {
       const plan = String(provider.metadata?.subscription_type || "current");
       const planLabel = `${plan.charAt(0).toUpperCase()}${plan.slice(1)}`;
+      const responses = Number(provider.metadata?.statusline_responses_seen) || 0;
       return quotaLocale(
-        `${planLabel} plan · no supported automatic quota source`,
-        `${planLabel} 方案 · 无受支持的自动额度源`,
+        `${planLabel} plan · ${responses} responses returned no rate limits`,
+        `${planLabel} 方案 · ${responses} 次回复均未返回额度`,
+      );
+    }
+    if (provider.metadata?.capture_configured && !provider.metadata?.statusline_invoked) {
+      return quotaLocale(
+        "Configured · Claude Desktop never runs statusLine, use the claude CLI",
+        "已配置 · Claude Desktop 不执行 statusLine，请在终端运行 claude",
       );
     }
     if (provider.metadata?.capture_configured) {

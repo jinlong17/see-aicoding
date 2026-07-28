@@ -21,11 +21,16 @@
   sanitized user-only Claude snapshot that never stores session or credential
   fields. Identical Claude values are write-deduplicated for one minute.
 - Automatically prefer and validate app-bundled Codex binaries before PATH
-  candidates, fall back when an older CLI lacks the required app-server
-  protocol, and distinguish a configured Claude Pro/Max capture that is waiting
-  for its first eligible response from a Claude Team plan that supports manual
-  quota values only. The sanitized subscription-type check is cached for 15
-  minutes and never exposes or persists credentials.
+  candidates, and fall back when an older CLI lacks the required app-server
+  protocol.
+- Record every Claude status-line run, including runs that carry no
+  `rate_limits`, so the Claude card distinguishes a command that has never been
+  invoked (Claude Desktop does not execute Claude Code `statusLine`) from one
+  waiting for its first response and from an account whose responses never
+  publish quota. The manual-only verdict now comes from observed responses
+  rather than the plan name; the sanitized subscription-type check is kept only
+  to name the plan, is cached for 15 minutes, and never exposes or persists
+  credentials.
 - Added staggered, cached project allocation measurements to AI workload,
   project, and session cards without running `du` on the hot sampling path.
 - Added best-effort CPU temperature reporting with explicit unsupported states.
