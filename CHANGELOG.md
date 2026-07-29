@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — 2026-07-22
+## Unreleased — 2026-07-28
 
 ### Language, appearance, and AI workload context
 
@@ -39,13 +39,30 @@
 
 - Cached stable process metadata and slow system probes, and removed repeated
   socket, SQLite, and system-memory reads from the snapshot hot path.
+- Build the compact SSE snapshot directly and lazily materialize the full
+  process/program inventory at most once per sampling window. This removes the
+  former build-full-then-trim work from every live event while preserving the
+  public full schema and a shared generation timestamp.
+- Cache bounded process classification and application-bundle grouping results;
+  cache status, thread count, and accumulated process CPU time for 5 seconds;
+  derive memory percentage from the already-read RSS value; and detect
+  unsupported per-process I/O once instead of repeating failed calls on macOS.
 - Reduced the live SSE payload to summary data; full process/program arrays are
-  fetched only while the process section is near the viewport.
+  fetched only while the process section is near the viewport and now follow
+  the selected refresh mode at 4.5, 9, or 15 seconds.
 - Added balanced 3-second and efficient 5-second refresh modes, visibility-aware
   pause/resume, lazy runtime polling, request de-duplication, and animation-frame
   render coalescing.
+- Skip unchanged event and process-table DOM replacement, keep lightweight
+  process totals live between full inventory refreshes, scope Chinese
+  localization to changed sections, and disable decorative meter/loading
+  animation in Efficient mode.
+- In a same-load development profile with about 687 readable processes, reduced
+  a forced compact refresh from 73.46 ms to 41.02 ms (44.2%) and kept the
+  compact event near 7% of the full JSON payload.
 - Added tests for language/theme controls, quota normalization, compact streams,
-  workload disk attribution, CPU temperature probing, and polling regressions.
+  lazy full-snapshot materialization, workload disk attribution, CPU
+  temperature probing, scoped rendering, and polling regressions.
 
 ## 0.4.0 — 2026-07-21
 

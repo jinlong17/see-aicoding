@@ -191,6 +191,40 @@ processes, disk I/O, services, containers, and alert states each have a
 dedicated token. Claude, ChatGPT, and Cursor keep stable identity colors across
 their cards, trends, projects, sessions, and child-process rows.
 
+### Lightweight refresh and performance
+
+The live path builds the compact SSE model directly. It does not first build
+and then discard the complete process and application inventories. A full
+schema-v3 snapshot is materialized once per sampling window only when the
+process section is near the viewport or an API client requests
+`/api/snapshot`. Stable process metadata is cached for 30 seconds; thread count,
+status, and accumulated CPU time use a 5-second cache. CPU percentage, resident
+memory, disk/network rates, hardware telemetry, and AI workload totals continue
+to follow the selected live refresh interval.
+
+Refresh modes control both SSE and full process detail:
+
+| Mode | Compact SSE | Full process detail while visible |
+| --- | ---: | ---: |
+| Realtime | 1.5 s | 4.5 s |
+| Balanced | 3 s | 9 s |
+| Efficient | 5 s | 15 s |
+
+Background runtime collectors run only while their section and browser tab are
+active. Hiding quota cards pauses future provider collection. Compact events
+and unchanged process tables use difference signatures to avoid repeated DOM
+replacement; Chinese localization is scoped to sections that actually changed
+instead of rescanning the whole document. Efficient mode also disables
+decorative meter and loading animations. The page uses SVG/DOM charts and does
+not create a WebGL or canvas renderer, so the dashboard itself does not reserve
+a separate GPU rendering workload.
+
+On a development 10-core macOS host with roughly 687 readable processes, the
+same forced compact-refresh profile fell from 73.46 ms to 41.02 ms per cycle
+(44.2%); the compact event was about 31 KiB versus 438 KiB for the full snapshot
+(7.1%). This is a representative engineering measurement, not a hardware SLA;
+actual cost scales with process count and enabled platform providers.
+
 ### Automatic AI quota updates
 
 Quota collection runs independently from the resource sampling loop. Results
@@ -374,7 +408,8 @@ Sampling flow:
 5. `render_all()` draws the header, three zones, current-user resource watch, footer, sparklines, and extension inventory.
 6. `SystemTelemetry.sample()` adds CPU, GPU, memory, disk, network, sensor, and history data.
 7. Threshold transitions and resource samples are written to SQLite with a bounded retention policy.
-8. `build_snapshot()` normalizes schema v3 for `/api/snapshot` and cached `/events` delivery.
+8. `build_snapshot()` normalizes schema v3, builds the compact cached `/events`
+   model directly, and materializes full `/api/snapshot` inventories on demand.
 9. Services, long history, process network attribution, containers, and selected process details use separate on-demand endpoints.
 10. Provider quotas refresh on an independent cached worker and merge with manual values outside the resource snapshot path.
 
