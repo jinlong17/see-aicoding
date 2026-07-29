@@ -178,8 +178,12 @@ The Web monitor serves a local-only system resource center at
 `http://127.0.0.1:8765/`. Its compact single-page layout keeps resource cards at
 the top and presents AI workloads, trends and alerts, resource leaders, process
 inventory, storage health, and runtime data as movable sections instead of
-large top-level tabs. Customize controls persist density, section visibility,
-section order, idle-provider visibility, and process columns in SQLite.
+large top-level tabs. The unified Settings panel controls language, five themes,
+small/standard/large text sizing, density, section visibility, section order,
+refresh policy, quota fallbacks, and process columns. Changes remain a local
+draft until **Save** is clicked; **Reset** prepares the default draft, while
+clicking outside the panel or pressing Escape closes it without applying
+unsaved changes. Saved preferences persist in SQLite.
 Apple Silicon, NVIDIA, Linux DRM, SMART, launchd/systemd, nettop, Docker, and
 Podman providers are detected at runtime and expose explicit unavailable states.
 Process details are loaded on demand; current-user suspend, resume, and
@@ -236,11 +240,15 @@ memory, GPU, disk, or process snapshots. A transient refresh failure preserves
 the last successful values with an explicit stale state.
 
 The compact quota cards use two circular gauges per service for the 5-hour and
-weekly windows. Use **Hide quotas / Show quotas** in AI Workloads, or the
-persistent quota switch in Settings. Hiding the cards also pauses future
-automatic collection; showing them resumes the collector and requests a fresh
-cached result. No separate quota daemon or startup command is required:
-`see-aicoding --web` owns the lightweight collector.
+weekly windows. A full ring and `100%` mean all quota remains; the center value
+is remaining capacity, while used capacity stays available as secondary text.
+Manual Settings inputs also accept **remaining percentages** and are translated
+to the internal used-percentage schema for backward compatibility. Use
+**Hide quotas / Show quotas** in AI Workloads, or the persistent quota switch
+in Settings. Hiding the cards also pauses future automatic collection; showing
+them resumes the collector and requests a fresh cached result. No separate
+quota daemon or startup command is required: `see-aicoding --web` owns the
+lightweight collector.
 
 - **ChatGPT:** the dashboard automatically prefers the Codex binary bundled
   with ChatGPT.app/Codex.app, validates the app-server protocol by making the
@@ -297,7 +305,8 @@ status text. That auth status check runs on the independent quota worker, has a
 3-second timeout, is cached for 15 minutes, and neither returns nor persists
 credentials. A missing field does not erase the last good local snapshot.
 Automatic values take precedence; Settings values fill only quota windows that
-the automatic source did not return.
+the automatic source did not return. Those manual fields are entered as
+remaining capacity, matching the gauge direction.
 
 See [the resource dashboard architecture](https://github.com/jinlong17/see-aicoding/blob/main/docs/RESOURCE_DASHBOARD_ARCHITECTURE.md)
 for the research basis, module boundaries, GPU availability contract, and

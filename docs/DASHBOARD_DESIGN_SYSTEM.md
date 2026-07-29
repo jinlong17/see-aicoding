@@ -1,6 +1,6 @@
 # Dashboard design system
 
-Updated: 2026-07-22
+Updated: 2026-07-29
 
 ## Purpose
 
@@ -91,17 +91,25 @@ and chart registry.
   unavailable; hidden cards do not reserve empty grid space.
 - The default density is `compact`; `comfortable` increases spacing without
   changing information architecture.
+- Programs and Processes use semantic fixed-width columns so headers and cells
+  remain aligned; numeric cells align right and use the primary text color.
 
 ## Language and theme contract
 
-- The single Settings entry owns language, theme, density, section, column,
-  refresh, and optional quota preferences; there is no second appearance menu.
+- The single Settings entry owns language, theme, text size, density, section,
+  column, refresh, and optional quota preferences; there is no second
+  appearance menu.
+- Settings changes are staged until Save. Reset only prepares a default draft;
+  clicking outside or pressing Escape closes the panel without applying it.
 - English and Simplified Chinese use the same DOM and stable semantic values.
   Language changes labels and locale formatting, never provider or process ids.
 - `light`, `warm`, `mint`, `dark`, and `deep` override neutral surfaces while
   preserving resource and provider identity tokens.
 - Theme variables are applied before the stylesheet loads when a local cached
   choice exists, preventing a bright or dark flash during navigation.
+- `small`, `medium`, and `large` text scales share the same layout tokens.
+  `medium` is the readable default; changing size must not alter metric values
+  or semantic colors.
 - Mobile controls retain a minimum 44px touch target and dense tables scroll
   inside their container rather than widening the page.
 
@@ -116,6 +124,7 @@ and chart registry.
 | Storage | Storage capacity color | Separate read, write, IOPS, and latency colors |
 | Runtime | Network, service, or container panel identity | Text provider and availability state |
 | AI workload | Fixed provider identity color | CPU activity, project, session, and process values |
+| AI quota | Remaining-capacity ring (`100%` is full) | Used capacity, reset time, source, update time |
 | Alerts | Warning/critical/resolved state color | Explicit action, timestamp, threshold, and message |
 
 ## Commands
@@ -151,6 +160,8 @@ git diff --check
   session does not leak another provider or system color into the tree.
 - Themes: all five modes keep text, borders, focus rings, charts, and unavailable
   states legible without changing semantic resource colors.
+- Text sizes: small, standard, and large retain readable metric, quota, table,
+  and workload values without page-level overflow.
 - Languages: English and Simplified Chinese fit at desktop and narrow widths
   without truncating controls or changing metric values.
 - Charts: CPU, memory, GPU, read, and write legend colors match their lines.
@@ -160,6 +171,7 @@ git diff --check
 - Mobile: no page-level horizontal overflow; process tables may scroll inside
   their own container.
 - Accessibility: progress bars retain names and numeric ARIA values; keyboard
-  focus remains visible; color never replaces a textual label.
+  focus remains visible; quota progress names and values describe remaining
+  capacity; color never replaces a textual label.
 - Console: no application warnings or errors after loading, reordering a
   section, and expanding an AI session.

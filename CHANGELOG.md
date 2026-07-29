@@ -1,11 +1,17 @@
 # Changelog
 
-## Unreleased — 2026-07-28
+## Unreleased — 2026-07-29
 
 ### Language, appearance, and AI workload context
 
 - Added a unified Settings entry for English/Simplified Chinese, five persisted
-  themes, density, section ordering, process columns, and refresh policy.
+  themes, small/standard/large text sizing, density, section ordering, process
+  columns, and refresh policy. Settings now use a staged draft: Reset prepares
+  defaults, Save applies and persists all changes, and clicking outside or
+  pressing Escape closes the panel without applying an unsaved draft.
+- Increased the default metric, table, quota, and AI-workload number sizes and
+  strengthened secondary-text contrast across light, warm, mint, dark, and deep
+  themes while retaining the compact card system and mobile 44px controls.
 - Standardized user-facing Codex/OpenAI workload labels as ChatGPT while
   retaining stable internal detector identifiers.
 - Added per-provider quota cards for Claude, ChatGPT, and Cursor. Values are
@@ -14,8 +20,14 @@
   Cursor remains manual or unavailable because no supported personal source is
   assumed.
 - Reworked quota cards into compact 5-hour and weekly circular gauges, with
-  direct and Settings-based visibility controls. Hiding them pauses future
-  automatic quota refreshes; showing them resumes collection.
+  direct and Settings-based visibility controls. Gauges now fill by remaining
+  capacity, so 100% is full and the center value is the remaining percentage;
+  manual Settings fields use the same remaining-capacity convention. Hiding
+  them pauses future automatic quota refreshes; showing them resumes collection.
+- Rebalanced the Programs and Processes table with semantic fixed-width columns,
+  aligned numeric headers and cells, tighter spacing, and contained horizontal
+  scrolling on narrow screens. The top process gauge now shows only the running
+  process count without a redundant Run/运行 suffix.
 - Added a local-only quota collector with a 5-minute cache, 8-second provider
   timeout, bounded exponential failure retry, manual refresh cooldown, and a
   sanitized user-only Claude snapshot that never stores session or credential
@@ -62,7 +74,8 @@
   compact event near 7% of the full JSON payload.
 - Added tests for language/theme controls, quota normalization, compact streams,
   lazy full-snapshot materialization, workload disk attribution, CPU
-  temperature probing, scoped rendering, and polling regressions.
+  temperature probing, staged Settings, font sizing, remaining-capacity gauges,
+  process-column alignment, scoped rendering, and polling regressions.
 
 ## 0.4.0 — 2026-07-21
 
