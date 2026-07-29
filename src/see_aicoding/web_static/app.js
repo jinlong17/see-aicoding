@@ -106,6 +106,20 @@ const ZH_TEXT = {
   "Programs": "程序",
   "Processes": "进程",
   "Tree": "进程树",
+  "Search programs or processes": "搜索程序或进程",
+  "Search name, PID, user, or command": "搜索名称、PID、用户或命令",
+  "Application / command": "应用 / 命令",
+  "Process / command": "进程 / 命令",
+  "Process tree / command": "进程树 / 命令",
+  "Procs": "进程数",
+  "PID / PPID": "PID / PPID",
+  "User": "用户",
+  "State": "状态",
+  "Memory": "内存",
+  "Disk R/W": "磁盘读写",
+  "Network ↓/↑": "网络 ↓/↑",
+  "Threads": "线程",
+  "Age": "运行时长",
   "All users": "所有用户",
   "Current user": "当前用户",
   "All states": "所有状态",
@@ -205,6 +219,9 @@ const state = {
   eventSource: null,
   fallbackTimer: null,
   thresholdRenderSignature: "",
+  eventRenderSignature: "",
+  processRenderSignature: "",
+  networkRevision: 0,
   historyRange: "live",
   historyModel: null,
   historyRequest: 0,
@@ -686,6 +703,10 @@ function renderOverview(snapshot) {
   el.topCpu.innerHTML = renderLeaders(resources.top_cpu || [], "cpu");
   el.topMemory.innerHTML = renderLeaders(resources.top_memory || [], "memory");
   renderThirdLeader(resources, gpu);
+  if (state.preferences.language === "zh-CN") {
+    localizeDom(document.querySelector(".metric-grid"));
+    localizeDom(document.querySelector("[data-dashboard-order='leaders']"));
+  }
 }
 
 function networkLeaderItems() {
@@ -942,26 +963,61 @@ function processTreeRows(items) {
 function renderProcesses(snapshot) {
   const mode = state.processMode;
   const source = mode === "programs" ? snapshot.resources?.programs || [] : snapshot.processes?.items || [];
+  const summary = snapshot.system?.process_summary || {};
+  const tree = snapshot.processes?.tree || {};
+  el.processSummary.textContent = mode === "programs"
+    ? localized(
+      `${formatNumber(source.length)} application groups with helper processes merged.`,
+      `${formatNumber(source.length)} 个应用分组，已合并辅助进程。`,
+    )
+    : mode === "tree"
+      ? localized(
+        `${formatNumber(tree.root_count || 0)} roots · ${formatNumber(tree.max_depth || 0)} levels; filters retain parent context.`,
+        `${formatNumber(tree.root_count || 0)} 个根进程 · ${formatNumber(tree.max_depth || 0)} 层；筛选时保留父级上下文。`,
+      )
+      : localized(
+        `${formatNumber(source.length)} readable processes. Select a row for full resource details.`,
+        `${formatNumber(source.length)} 个可读取进程；选择一行查看完整资源详情。`,
+      );
+  el.processTotal.textContent = formatNumber(summary.total || snapshot.processes?.items?.length || 0);
+  el.processRunning.textContent = formatNumber(summary.running || 0);
+
+  const renderSignature = JSON.stringify({
+    detail: snapshot.process_detail_generated_at || 0,
+    mode: state.processMode,
+    query: state.processQuery,
+    scope: state.processScope,
+    status: state.processStatus,
+    sort: [state.processSortKey, state.processSortDir],
+    limit: state.processLimit,
+    columns: state.preferences.process_columns,
+    language: state.preferences.language,
+    network: state.networkRevision,
+  });
+  if (state.processRenderSignature === renderSignature) return false;
+  state.processRenderSignature = renderSignature;
   const filtered = mode === "tree" ? processTreeRows(source) : sortedProcessItems(source.filter((item) =>
     processSearchMatch(item, mode) && processScopeMatch(item, mode) && processStatusMatch(item, mode)
   ), mode);
   const visible = filtered.slice(0, state.processLimit);
-  const summary = snapshot.system?.process_summary || {};
-  const tree = snapshot.processes?.tree || {};
-
-  el.processSummary.textContent = mode === "programs" ? `${formatNumber(source.length)} application groups with helper processes merged.`
-    : mode === "tree" ? `${formatNumber(tree.root_count || 0)} roots · ${formatNumber(tree.max_depth || 0)} levels; filters retain parent context.`
-    : `${formatNumber(source.length)} readable processes. Select a row for full resource details.`;
-  el.processTotal.textContent = formatNumber(summary.total || snapshot.processes?.items?.length || 0);
-  el.processRunning.textContent = formatNumber(summary.running || 0);
   el.processTableHead.innerHTML = renderProcessHead(mode);
   el.processTableBody.innerHTML = visible.length
     ? visible.map((row) => mode === "programs" ? renderProgramRow(row) : mode === "tree" ? renderProcessRow(row.item, row.depth, row.hasChildren) : renderProcessRow(row)).join("")
-    : `<tr><td colspan="${selectedProcessColumns(mode).length}"><div class="empty-state">No ${mode === "programs" ? "applications" : "processes"} match the current filters</div></td></tr>`;
-  el.visibleProcessCount.textContent = `Showing ${formatNumber(visible.length)} of ${formatNumber(filtered.length)}`;
+    : `<tr><td colspan="${selectedProcessColumns(mode).length}"><div class="empty-state">${localized(
+      `No ${mode === "programs" ? "applications" : "processes"} match the current filters`,
+      `没有符合当前筛选条件的${mode === "programs" ? "应用" : "进程"}`,
+    )}</div></td></tr>`;
+  el.visibleProcessCount.textContent = localized(
+    `Showing ${formatNumber(visible.length)} of ${formatNumber(filtered.length)}`,
+    `显示 ${formatNumber(visible.length)} / ${formatNumber(filtered.length)}`,
+  );
   el.showMoreProcesses.hidden = visible.length >= filtered.length;
   document.querySelectorAll("[data-process-mode]").forEach((button) => button.classList.toggle("is-active", button.dataset.processMode === mode));
   document.querySelectorAll(".process-only").forEach((node) => { node.hidden = mode === "programs"; });
+  if (state.preferences.language === "zh-CN") {
+    localizeDom(document.querySelector("[data-dashboard-order='processes']"));
+  }
+  return true;
 }
 
 function renderStorage(snapshot) {
@@ -1027,6 +1083,9 @@ function renderStorage(snapshot) {
   if (battery) rows.push(`<div class="sensor-row"><span>Battery${battery.plugged ? " · plugged in" : ""}</span><b>${formatPct(battery.percent, 0)}</b></div>`);
   el.sensorList.hidden = rows.length === 0;
   el.sensorList.innerHTML = rows.join("");
+  if (state.preferences.language === "zh-CN") {
+    localizeDom(document.querySelector("[data-dashboard-order='storage']"));
+  }
 }
 
 function serviceStateLabel(stateValue, subState = "") {
@@ -1168,10 +1227,12 @@ async function fetchNetwork(force = false) {
     if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
     state.networkAttribution = payload;
     state.networkByPid = new Map((payload.items || []).map((item) => [Number(item.pid), item]));
+    state.networkRevision += 1;
     renderNetworkAttribution(payload);
   } catch (error) {
     state.networkAttribution = { available: false, throughput_available: false, items: [], summary: {}, note: error.message || "Failed to read network attribution" };
     state.networkByPid = new Map();
+    state.networkRevision += 1;
     renderNetworkAttribution(state.networkAttribution);
   } finally {
     el.refreshNetwork.disabled = false;
@@ -1240,6 +1301,15 @@ function renderEvents(snapshot) {
   const active = model.active || [];
   const events = model.events || [];
   const thresholds = model.thresholds || {};
+  const renderSignature = JSON.stringify({
+    summary,
+    active,
+    events,
+    thresholds,
+    language: state.preferences.language,
+  });
+  if (state.eventRenderSignature === renderSignature) return false;
+  state.eventRenderSignature = renderSignature;
   renderAlertBadge(snapshot);
 
   el.alertSummary.innerHTML = `<span><b>${formatNumber(summary.active || 0)}</b> active</span><span><b>${formatNumber(summary.critical || 0)}</b> critical</span><span><b>${formatNumber(summary.warning || 0)}</b> warning</span>`;
@@ -1273,7 +1343,10 @@ function renderEvents(snapshot) {
       </div>
       <span class="timeline-value">${item.value === null || item.value === undefined ? "--" : `${Number(item.value).toFixed(1)}${escapeHtml(item.unit)}`}</span>
     </article>`).join("") : `<div class="empty-state">No threshold transitions yet. Events appear when a resource crosses a configured threshold.</div>`;
-  if (state.historyModel) renderPersistentHistory(state.historyModel);
+  if (state.preferences.language === "zh-CN") {
+    localizeDom(document.querySelector("[data-dashboard-order='overview']"));
+  }
+  return true;
 }
 
 function renderPersistentHistory(model) {
@@ -1439,6 +1512,7 @@ function applyPreferences(preferences, rerender = true) {
   const previousPerformanceMode = state.preferences.performance_mode;
   state.preferences = normalizePreferences(preferences);
   document.body.dataset.density = state.preferences.density;
+  document.documentElement.dataset.performanceMode = state.preferences.performance_mode;
   applyTheme();
   applySectionOrder();
   document.querySelectorAll("[data-dashboard-section]").forEach((section) => {
@@ -1479,7 +1553,13 @@ function applyPreferences(preferences, rerender = true) {
     renderProviderUsage(state.providerUsage);
   }
   if (previousLanguage !== state.preferences.language || !rerender) localizeDom();
-  if (previousPerformanceMode !== state.preferences.performance_mode && state.eventSource && !state.paused) startEvents();
+  if (previousPerformanceMode !== state.preferences.performance_mode && !state.paused) {
+    if (state.eventSource) startEvents();
+    if (state.processTimer) {
+      stopProcessPolling();
+      startProcessPolling();
+    }
+  }
 }
 
 async function fetchPreferences() {
@@ -1810,6 +1890,9 @@ function renderAi(snapshot) {
       <div class="session-list">${sessions.length ? sessions.map(renderAiSession).join("") : `<div class="empty-state compact">No active sessions</div>`}</div>
     </article>`;
   }).join("") : `<div class="empty-state compact">No active AI coding sessions. Enable “Show idle providers” to inspect inactive integrations.</div>`;
+  if (state.preferences.language === "zh-CN") {
+    localizeDom(document.querySelector("[data-dashboard-order='coding']"));
+  }
 }
 
 function renderCurrentView() {
@@ -1832,12 +1915,10 @@ function sectionNearViewport(id) {
 function renderAll() {
   if (!state.snapshot) return;
   renderOverview(state.snapshot);
-  renderAlertBadge(state.snapshot);
   renderEvents(state.snapshot);
   if (sectionNearViewport("processes")) renderProcesses(state.snapshot);
   if (sectionNearViewport("storage")) renderStorage(state.snapshot);
   if (sectionNearViewport("coding")) renderAi(state.snapshot);
-  if (state.preferences.language === "zh-CN") localizeDom();
 }
 
 function queueSnapshot(snapshot) {
@@ -1847,6 +1928,7 @@ function queueSnapshot(snapshot) {
   if (snapshot.stream_compact && fullSource) {
     snapshot = {
       ...snapshot,
+      process_detail_generated_at: fullSource.process_detail_generated_at || 0,
       processes: {
         ...(snapshot.processes || {}),
         items: fullSource.processes?.items || [],
@@ -1856,6 +1938,8 @@ function queueSnapshot(snapshot) {
         programs: fullSource.resources?.programs || [],
       },
     };
+  } else if (!snapshot.stream_compact) {
+    snapshot.process_detail_generated_at = snapshot.generated_at || Date.now() / 1000;
   }
   state.pendingSnapshot = snapshot;
   if (state.renderFrame) return;
@@ -2083,9 +2167,10 @@ function startProcessPolling() {
   if (state.paused || document.hidden || !sectionNearViewport("processes")) return;
   fetchSnapshot();
   if (!state.processTimer) {
+    const interval = (PERFORMANCE_INTERVALS[state.preferences.performance_mode] || 3) * 3000;
     state.processTimer = window.setInterval(() => {
       if (!state.paused && !document.hidden && sectionNearViewport("processes")) fetchSnapshot();
-    }, 9000);
+    }, interval);
   }
 }
 

@@ -561,6 +561,17 @@ main { display: grid; gap: var(--space); }
 .confirm-box { padding: 9px; border: 1px solid color-mix(in srgb, var(--state-critical) 40%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--state-critical) 8%, transparent); }
 .confirm-box p, .manage-note { color: var(--dim); font-size: 11px; }
 .toast { position: fixed; z-index: 100; right: 16px; bottom: 16px; max-width: min(360px, calc(100vw - 32px)); padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-raised); color: var(--text); box-shadow: var(--shadow); opacity: 0; pointer-events: none; transform: translateY(10px); transition: 150ms ease; }
+
+:root[data-performance-mode="efficient"] .meter span,
+:root[data-performance-mode="efficient"] .workload-track > span {
+  transition: none;
+}
+
+:root[data-performance-mode="efficient"] .skeleton-block,
+:root[data-performance-mode="efficient"] .skeleton-card,
+:root[data-performance-mode="efficient"] .skeleton-row {
+  animation: none;
+}
 .toast.is-visible { opacity: 1; transform: none; }
 .toast.is-error { border-color: color-mix(in srgb, var(--state-critical) 46%, var(--line)); color: var(--state-critical); }
 

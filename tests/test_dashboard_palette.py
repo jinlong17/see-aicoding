@@ -79,6 +79,33 @@ class DashboardPaletteTests(unittest.TestCase):
         self.assertNotIn('setInterval(fetchNetworkAttribution, 4000)', javascript)
         self.assertNotIn('setInterval(fetchContainers, 8000)', javascript)
 
+    def test_frontend_skips_unchanged_heavy_sections_in_efficient_mode(self) -> None:
+        css = CSS_PATH.read_text(encoding="utf-8")
+        javascript = JS_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("eventRenderSignature", javascript)
+        self.assertIn("processRenderSignature", javascript)
+        self.assertIn("process_detail_generated_at", javascript)
+        self.assertIn(
+            "document.documentElement.dataset.performanceMode",
+            javascript,
+        )
+        render_all = javascript.split("function renderAll()", 1)[1].split(
+            "function queueSnapshot", 1
+        )[0]
+        self.assertNotIn("localizeDom()", render_all)
+        self.assertIn(
+            "(PERFORMANCE_INTERVALS[state.preferences.performance_mode] || 3) * 3000",
+            javascript,
+        )
+        self.assertIn(
+            'localizeDom(document.querySelector("[data-dashboard-order=\'processes\']"))',
+            javascript,
+        )
+        self.assertIn(':root[data-performance-mode="efficient"] .meter span', css)
+        self.assertIn("transition: none", css)
+        self.assertIn("animation: none", css)
+
     def test_language_switch_rerenders_dynamic_quota_labels(self) -> None:
         javascript = JS_PATH.read_text(encoding="utf-8")
 
