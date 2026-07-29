@@ -91,6 +91,7 @@ class DashboardPreferencesTests(unittest.TestCase):
         )
 
         self.assertEqual(result["density"], "compact")
+        self.assertEqual(result["font_size"], "medium")
         self.assertEqual(result["hidden_sections"], ["runtime"])
         self.assertTrue(result["show_idle_ai"])
         self.assertEqual(
@@ -103,6 +104,7 @@ class DashboardPreferencesTests(unittest.TestCase):
         result = normalize_dashboard_preferences(None)
 
         self.assertEqual(result["density"], "compact")
+        self.assertEqual(result["font_size"], "medium")
         self.assertEqual(result["language"], "en")
         self.assertEqual(result["theme"], "deep")
         self.assertEqual(result["performance_mode"], "balanced")
@@ -120,6 +122,7 @@ class DashboardPreferencesTests(unittest.TestCase):
             {
                 "language": "zh-CN",
                 "theme": "mint",
+                "font_size": "large",
                 "performance_mode": "efficient",
                 "show_quota_cards": False,
                 "provider_quotas": {
@@ -140,6 +143,7 @@ class DashboardPreferencesTests(unittest.TestCase):
 
         self.assertEqual(result["language"], "zh-CN")
         self.assertEqual(result["theme"], "mint")
+        self.assertEqual(result["font_size"], "large")
         self.assertEqual(result["performance_mode"], "efficient")
         self.assertFalse(result["show_quota_cards"])
         self.assertEqual(
@@ -166,6 +170,7 @@ class DashboardPreferencesTests(unittest.TestCase):
             {
                 "language": "fr",
                 "theme": "neon",
+                "font_size": "tiny",
                 "performance_mode": "turbo",
                 "quota_updated_at": "yesterday",
             }
@@ -173,6 +178,7 @@ class DashboardPreferencesTests(unittest.TestCase):
 
         self.assertEqual(result["language"], "en")
         self.assertEqual(result["theme"], "deep")
+        self.assertEqual(result["font_size"], "medium")
         self.assertEqual(result["performance_mode"], "balanced")
         self.assertIsNone(result["quota_updated_at"])
 

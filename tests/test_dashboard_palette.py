@@ -66,9 +66,25 @@ class DashboardPaletteTests(unittest.TestCase):
             self.assertIn(f'[data-theme="{theme}"]', css)
             self.assertIn(f'<option value="{theme}">', html)
         self.assertIn('<option value="zh-CN">简体中文</option>', html)
+        self.assertIn('id="fontSizeSelect"', html)
+        self.assertIn('id="savePreferences"', html)
         self.assertIn('const ZH_TEXT = {', javascript)
         self.assertIn('document.documentElement.lang = state.preferences.language', javascript)
+        self.assertIn('document.documentElement.dataset.fontSize = state.preferences.font_size', javascript)
+        self.assertIn(':root[data-font-size="small"]', css)
+        self.assertIn(':root[data-font-size="large"]', css)
         self.assertIn('PERFORMANCE_INTERVALS = { realtime: 1.5, balanced: 3, efficient: 5 }', javascript)
+
+    def test_settings_use_an_explicit_save_and_discard_outside_clicks(self) -> None:
+        javascript = JS_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("function beginSettingsDraft()", javascript)
+        self.assertIn("async function saveSettings()", javascript)
+        self.assertIn('el.savePreferences.addEventListener("click", saveSettings)', javascript)
+        self.assertIn('document.addEventListener("pointerdown"', javascript)
+        self.assertIn('!event.target.closest("#customizeMenu")', javascript)
+        self.assertNotIn("schedulePreferenceSave", javascript)
+        self.assertNotIn("updatePreferencesFromControls", javascript)
 
     def test_frontend_uses_compact_stream_and_lazy_runtime_polling(self) -> None:
         javascript = JS_PATH.read_text(encoding="utf-8")
@@ -132,11 +148,34 @@ class DashboardPaletteTests(unittest.TestCase):
         self.assertIn("el.quotaGrid.hidden = !state.preferences.show_quota_cards", javascript)
         self.assertIn("state.providerUsage.next_refresh_at", javascript)
         self.assertIn("state.quotaFetchFailures += 1", javascript)
+        self.assertIn("state.quotaRefreshQueued = true", javascript)
         self.assertIn("next_refresh_at: Date.now() / 1000 + retrySeconds", javascript)
         self.assertIn('aria-valuetext="${quotaLocale("Unavailable", "不可用")}"', javascript)
         self.assertIn('return quotaLocale("Manual only", "仅支持手动")', javascript)
         self.assertIn('quotaLocale("Waiting", "等待回复")', javascript)
         self.assertIn('quotaLocale("CLI not run", "CLI 未运行")', javascript)
+
+    def test_process_inventory_and_gauges_use_compact_semantic_layouts(self) -> None:
+        css = CSS_PATH.read_text(encoding="utf-8")
+        javascript = JS_PATH.read_text(encoding="utf-8")
+        html = HTML_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('id="processTable"', html)
+        self.assertIn('el.processTable.dataset.mode = mode', javascript)
+        self.assertIn('data-column="${escapeHtml(key)}"', javascript)
+        self.assertIn('#processTable[data-mode="programs"] [data-column="identity"]', css)
+        self.assertIn("table-layout: fixed", css)
+        self.assertIn("setGauge(el.processChart, runningShare, formatNumber(processRunning))", javascript)
+        self.assertNotIn('localized("run", "运行")', javascript)
+
+    def test_quota_gauges_visualize_remaining_capacity(self) -> None:
+        javascript = JS_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('aria-valuenow="${clamp(remaining)}"', javascript)
+        self.assertIn('--gauge-value:${available ? clamp(remaining) : 0}%', javascript)
+        self.assertIn('${Math.round(remaining)}%', javascript)
+        self.assertIn('quotaLocale("remaining", "剩余")', javascript)
+        self.assertIn("100 - remaining", javascript)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="en" data-theme="deep">
+<html lang="en" data-theme="deep" data-font-size="medium">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <meta name="description" content="Compact local system monitoring for CPU, GPU, memory, storage, processes, services, network activity, containers, and AI coding workloads.">
   <title>see-aicoding · System monitor</title>
-  <script>try{document.documentElement.dataset.theme=localStorage.getItem("see-aicoding-theme")||"deep"}catch{}</script>
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("see-aicoding-theme")||"deep";document.documentElement.dataset.fontSize=localStorage.getItem("see-aicoding-font-size")||"medium"}catch{}</script>
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-density="compact">
@@ -37,11 +37,12 @@
         <details id="customizeMenu" class="customize-menu">
           <summary class="tool-btn">Settings</summary>
           <div class="customize-popover">
-            <div class="customize-head"><strong>Dashboard settings</strong><button id="resetPreferences" class="text-btn" type="button">Reset</button></div>
+            <div class="customize-head"><strong>Dashboard settings</strong><div class="customize-actions"><button id="resetPreferences" class="text-btn" type="button">Reset</button><button id="savePreferences" class="primary-btn" type="button" disabled>Save</button></div></div>
             <fieldset>
               <legend>Language and appearance</legend>
               <label class="select-setting"><span>Language</span><select id="languageSelect"><option value="en">English</option><option value="zh-CN">简体中文</option></select></label>
               <label class="select-setting"><span>Theme</span><select id="themeSelect"><option value="light">Light</option><option value="warm">Warm yellow</option><option value="mint">Soft green</option><option value="dark">Dark</option><option value="deep">Deep</option></select></label>
+              <label class="select-setting"><span>Text size</span><select id="fontSizeSelect"><option value="small">Small</option><option value="medium">Standard</option><option value="large">Large</option></select></label>
               <label class="select-setting"><span>Refresh</span><select id="performanceMode"><option value="realtime">Real-time · 1.5s</option><option value="balanced">Balanced · 3s</option><option value="efficient">Efficient · 5s</option></select></label>
             </fieldset>
             <fieldset>
@@ -83,9 +84,9 @@
               <p class="customize-note">Automatic local sources take priority. Manual values fill missing windows; no credentials are read.</p>
               <p class="customize-note">Claude automatic updates require an explicit status-line command: <code>see-aicoding --capture-claude-usage</code></p>
               <div class="quota-settings">
-                <div class="quota-setting-row"><strong>Claude</strong><label><span>5h used %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="claude" data-quota-window="five_hour"></label><label><span>Weekly used %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="claude" data-quota-window="weekly"></label></div>
-                <div class="quota-setting-row"><strong>ChatGPT</strong><label><span>5h used %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="chatgpt" data-quota-window="five_hour"></label><label><span>Weekly used %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="chatgpt" data-quota-window="weekly"></label></div>
-                <div class="quota-setting-row"><strong>Cursor</strong><label><span>5h used %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="cursor" data-quota-window="five_hour"></label><label><span>Weekly used %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="cursor" data-quota-window="weekly"></label></div>
+                <div class="quota-setting-row"><strong>Claude</strong><label><span>5h remaining %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="claude" data-quota-window="five_hour"></label><label><span>Weekly remaining %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="claude" data-quota-window="weekly"></label></div>
+                <div class="quota-setting-row"><strong>ChatGPT</strong><label><span>5h remaining %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="chatgpt" data-quota-window="five_hour"></label><label><span>Weekly remaining %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="chatgpt" data-quota-window="weekly"></label></div>
+                <div class="quota-setting-row"><strong>Cursor</strong><label><span>5h remaining %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="cursor" data-quota-window="five_hour"></label><label><span>Weekly remaining %</span><input type="number" min="0" max="100" step="0.1" inputmode="decimal" data-quota-provider="cursor" data-quota-window="weekly"></label></div>
               </div>
             </fieldset>
           </div>
@@ -178,7 +179,7 @@
             <label class="select-field"><span class="sr-only">Process scope</span><select id="processScope"><option value="all">All users</option><option value="mine">Current user</option></select></label>
             <label class="select-field process-only"><span class="sr-only">Process state</span><select id="processStatus"><option value="all">All states</option><option value="running">Running</option><option value="sleeping">Sleeping</option><option value="stopped">Stopped</option></select></label>
           </div>
-          <div class="table-scroll process-table-scroll"><table class="process-table"><thead id="processTableHead"></thead><tbody id="processTableBody"><tr><td><div class="table-loading">Building process inventory...</div></td></tr></tbody></table></div>
+          <div class="table-scroll process-table-scroll"><table id="processTable" class="process-table"><thead id="processTableHead"></thead><tbody id="processTableBody"><tr><td><div class="table-loading">Building process inventory...</div></td></tr></tbody></table></div>
           <div class="table-footer"><span id="visibleProcessCount">--</span><button id="showMoreProcesses" class="secondary-btn" type="button" hidden>Show more</button></div>
         </article>
       </section>

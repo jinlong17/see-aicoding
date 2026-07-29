@@ -66,6 +66,7 @@ _PROCESS_COLUMN_IDS = {
 }
 DEFAULT_DASHBOARD_PREFERENCES = {
     "density": "compact",
+    "font_size": "medium",
     "language": "en",
     "theme": "deep",
     "performance_mode": "balanced",
@@ -118,6 +119,7 @@ def normalize_dashboard_preferences(value: object) -> dict:
     """Return the safe, forwards-compatible subset of dashboard preferences."""
     source = value if isinstance(value, dict) else {}
     density = source.get("density")
+    font_size = source.get("font_size")
     language = source.get("language")
     theme = source.get("theme")
     performance_mode = source.get("performance_mode")
@@ -126,6 +128,8 @@ def normalize_dashboard_preferences(value: object) -> dict:
     order = source.get("section_order")
     if density not in {"compact", "comfortable"}:
         density = DEFAULT_DASHBOARD_PREFERENCES["density"]
+    if font_size not in {"small", "medium", "large"}:
+        font_size = DEFAULT_DASHBOARD_PREFERENCES["font_size"]
     if language not in {"en", "zh-CN"}:
         language = DEFAULT_DASHBOARD_PREFERENCES["language"]
     if theme not in {"light", "warm", "mint", "dark", "deep"}:
@@ -173,6 +177,7 @@ def normalize_dashboard_preferences(value: object) -> dict:
         quota_updated_at = None
     return {
         "density": density,
+        "font_size": font_size,
         "language": language,
         "theme": theme,
         "performance_mode": performance_mode,

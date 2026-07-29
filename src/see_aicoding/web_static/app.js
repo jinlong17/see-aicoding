@@ -25,9 +25,14 @@ const ZH_TEXT = {
   "Settings": "设置",
   "Dashboard settings": "看板设置",
   "Reset": "重置",
+  "Save": "保存",
   "Language and appearance": "语言与外观",
   "Language": "语言",
   "Theme": "主题",
+  "Text size": "文字大小",
+  "Small": "小",
+  "Standard": "标准",
+  "Large": "大",
   "Refresh": "刷新频率",
   "Light": "浅色",
   "Warm yellow": "浅黄色",
@@ -62,8 +67,8 @@ const ZH_TEXT = {
   "Show quotas": "显示额度",
   "Automatic local sources take priority. Manual values fill missing windows; no credentials are read.": "自动本地数据优先；手动值仅补充缺失窗口，且不会读取凭证。",
   "Claude automatic updates require an explicit status-line command:": "Claude 自动更新需要明确配置状态栏命令：",
-  "5h used %": "5 小时已用 %",
-  "Weekly used %": "每周已用 %",
+  "5h remaining %": "5 小时剩余 %",
+  "Weekly remaining %": "每周剩余 %",
   "Reading": "读取中",
   "Detecting": "检测中",
   "Live": "实时",
@@ -239,6 +244,7 @@ const state = {
   quotaRefreshAttempts: 0,
   quotaFetchFailures: 0,
   quotaRequestInFlight: false,
+  quotaRefreshQueued: false,
   pendingSnapshot: null,
   renderFrame: null,
   runtimeVisible: false,
@@ -246,6 +252,7 @@ const state = {
   containerRequestInFlight: false,
   preferences: {
     density: "compact",
+    font_size: "medium",
     language: "en",
     theme: "deep",
     performance_mode: "balanced",
@@ -261,7 +268,9 @@ const state = {
     },
     quota_updated_at: null,
   },
-  preferenceTimer: null,
+  settingsDraft: null,
+  settingsDirty: false,
+  preferenceSaveInFlight: false,
   searchTimer: null,
 };
 
@@ -277,7 +286,7 @@ const el = Object.fromEntries(
     "resourceTrendChart", "diskReadRate", "diskWriteRate", "networkDownRate", "networkUpRate",
     "updateTime", "gpuMetricCard", "gpuLegend",
     "topCpu", "topMemory", "topGpu", "processSummary", "processTotal", "processRunning",
-    "processSearch", "processScope", "processStatus", "processTableHead", "processTableBody",
+    "processSearch", "processScope", "processStatus", "processTable", "processTableHead", "processTableBody",
     "visibleProcessCount", "showMoreProcesses", "storageReadRate", "storageWriteRate",
     "storageIops", "storageLatency", "diskGrid", "diskIoChart", "sensorList",
     "smartProvider", "smartDeviceList", "deviceIoList", "aiTotals", "aiZones", "detailsDrawer",
@@ -290,7 +299,7 @@ const el = Object.fromEntries(
     "containerProvider", "containerSummary", "containerNote", "refreshContainers",
     "containerGrid", "containerPanel", "thirdLeaderCard", "thirdLeaderGlyph",
     "thirdLeaderTitle", "thirdLeaderNote", "showIdleAiToggle", "customizeMenu",
-    "resetPreferences", "sectionOrderList", "languageSelect", "themeSelect", "performanceMode", "quotaGrid", "refreshQuotas",
+    "resetPreferences", "savePreferences", "sectionOrderList", "languageSelect", "themeSelect", "fontSizeSelect", "performanceMode", "quotaGrid", "refreshQuotas",
     "showQuotaCardsSetting", "toggleQuotaVisibility",
     "drawerScrim", "detailsTitle", "detailsBody", "closeDetails", "toast",
   ].map((id) => [id, document.getElementById(id)])
@@ -680,7 +689,7 @@ function renderOverview(snapshot) {
   el.processValue.textContent = formatNumber(processTotal);
   el.processDetail.textContent = `${formatNumber(processRunning)} ${localized("running", "运行中")} · ${formatNumber(processSummary.threads || 0)} ${localized("threads", "线程")}`;
   setMeter(el.processMeter, runningShare);
-  setGauge(el.processChart, runningShare, `${formatNumber(processRunning)} ${localized("run", "运行")}`);
+  setGauge(el.processChart, runningShare, formatNumber(processRunning));
 
   if (state.historyRange === "live") {
     const liveSeries = [
@@ -854,7 +863,7 @@ function processHeadCell(key, mode) {
     : { identity: mode === "tree" ? "Process tree / command" : "Process / command", pid: "PID / PPID", user: "User", state: "State", cpu: "CPU", memory: "RSS", gpu: "GPU", disk: "Disk R/W", network: "Network ↓/↑", threads: "Threads", age: "Age" };
   const sortable = ["identity", "pid", "cpu", "memory", "gpu", "disk", "network", "threads", "age"].includes(key);
   const sortKey = key === "identity" ? "name" : key;
-  return `<th class="${numeric ? "num" : ""}">${sortable ? sortButton(sortKey, labels[key] || key) : escapeHtml(labels[key] || key)}</th>`;
+  return `<th data-column="${escapeHtml(key)}" class="${numeric ? "num" : ""}">${sortable ? sortButton(sortKey, labels[key] || key) : escapeHtml(labels[key] || key)}</th>`;
 }
 
 function renderProcessHead(mode) {
@@ -884,14 +893,14 @@ function renderProgramRow(item) {
     : item.gpu_memory_bytes ? formatBytes(item.gpu_memory_bytes) : "--";
   const network = networkForPids(item.pids || []);
   const cells = {
-    identity: `<td><div class="process-name-cell"><span class="process-avatar">${escapeHtml(initials(item.label))}</span><span class="process-name">${escapeHtml(item.label || "Unknown application")}<span class="process-sub">PID ${Number(item.primary_pid || 0)} · ${escapeHtml(item.detail || "grouped application")}</span></span></div></td>`,
-    pid: `<td class="num mono">${formatNumber(item.process_count || 0)}</td>`,
-    user: `<td title="${escapeHtml(users.join(", "))}">${escapeHtml(users.length > 1 ? `${users[0]} +${users.length - 1}` : users[0] || "--")}</td>`,
-    cpu: `<td class="num">${usageCell(item.cpu_capacity_percent || 0, formatPct(item.cpu_capacity_percent || 0))}</td>`,
-    memory: `<td class="num mono">${formatBytes(item.memory_bytes || 0)}</td>`,
-    gpu: `<td class="num mono">${gpuLabel}</td>`,
-    disk: `<td class="num mono">${ratePair(item.read_bytes_per_s || 0, item.write_bytes_per_s || 0)}</td>`,
-    network: `<td class="num mono">${ratePair(network.down, network.up)}</td>`,
+    identity: `<td data-column="identity"><div class="process-name-cell"><span class="process-avatar">${escapeHtml(initials(item.label))}</span><span class="process-name">${escapeHtml(item.label || "Unknown application")}<span class="process-sub">PID ${Number(item.primary_pid || 0)} · ${escapeHtml(item.detail || "grouped application")}</span></span></div></td>`,
+    pid: `<td data-column="pid" class="num mono">${formatNumber(item.process_count || 0)}</td>`,
+    user: `<td data-column="user" title="${escapeHtml(users.join(", "))}">${escapeHtml(users.length > 1 ? `${users[0]} +${users.length - 1}` : users[0] || "--")}</td>`,
+    cpu: `<td data-column="cpu" class="num">${usageCell(item.cpu_capacity_percent || 0, formatPct(item.cpu_capacity_percent || 0))}</td>`,
+    memory: `<td data-column="memory" class="num mono">${formatBytes(item.memory_bytes || 0)}</td>`,
+    gpu: `<td data-column="gpu" class="num mono">${gpuLabel}</td>`,
+    disk: `<td data-column="disk" class="num mono">${ratePair(item.read_bytes_per_s || 0, item.write_bytes_per_s || 0)}</td>`,
+    network: `<td data-column="network" class="num mono">${ratePair(network.down, network.up)}</td>`,
   };
   return `<tr class="process-row" data-pid="${Number(item.primary_pid || 0)}" tabindex="0">${selectedProcessColumns("programs").map((key) => cells[key] || "").join("")}</tr>`;
 }
@@ -904,17 +913,17 @@ function renderProcessRow(item, treeDepth = null, hasChildren = false) {
   const network = networkForPids([item.pid]);
   const mode = treeDepth === null ? "processes" : "tree";
   const cells = {
-    identity: `<td title="${escapeHtml(item.cmdline || "")}"><div class="process-name-cell">${treePrefix}<span class="process-avatar">${escapeHtml(initials(item.label || item.name))}</span><span class="process-name">${escapeHtml(item.label || item.name || `PID ${item.pid}`)}<span class="process-sub">${escapeHtml(item.cmdline || "Command unavailable")}</span></span></div></td>`,
-    pid: `<td class="num mono"><span class="stacked-stat"><span>${Number(item.pid || 0)}</span><span>ppid ${Number(item.ppid || 0)}</span></span></td>`,
-    user: `<td title="${escapeHtml(item.username || "")}">${escapeHtml(item.username || "--")}</td>`,
-    state: `<td><span class="status-badge status-${escapeHtml(item.status || "unknown")}">${escapeHtml(statusLabel(item.status))}</span></td>`,
-    cpu: `<td class="num">${usageCell(item.cpu_capacity_percent || 0, formatPct(item.cpu_capacity_percent || 0))}</td>`,
-    memory: `<td class="num mono">${formatBytes(item.memory_bytes || 0)}</td>`,
-    gpu: `<td class="num mono">${gpuLabel}</td>`,
-    disk: `<td class="num mono">${ratePair(item.read_bytes_per_s || 0, item.write_bytes_per_s || 0)}</td>`,
-    network: `<td class="num mono">${ratePair(network.down, network.up)}</td>`,
-    threads: `<td class="num mono">${formatNumber(item.threads || 0)}</td>`,
-    age: `<td class="num mono">${formatDuration(item.age_seconds || 0)}</td>`,
+    identity: `<td data-column="identity" title="${escapeHtml(item.cmdline || "")}"><div class="process-name-cell">${treePrefix}<span class="process-avatar">${escapeHtml(initials(item.label || item.name))}</span><span class="process-name">${escapeHtml(item.label || item.name || `PID ${item.pid}`)}<span class="process-sub">${escapeHtml(item.cmdline || "Command unavailable")}</span></span></div></td>`,
+    pid: `<td data-column="pid" class="num mono"><span class="stacked-stat"><span>${Number(item.pid || 0)}</span><span>ppid ${Number(item.ppid || 0)}</span></span></td>`,
+    user: `<td data-column="user" title="${escapeHtml(item.username || "")}">${escapeHtml(item.username || "--")}</td>`,
+    state: `<td data-column="state"><span class="status-badge status-${escapeHtml(item.status || "unknown")}">${escapeHtml(statusLabel(item.status))}</span></td>`,
+    cpu: `<td data-column="cpu" class="num">${usageCell(item.cpu_capacity_percent || 0, formatPct(item.cpu_capacity_percent || 0))}</td>`,
+    memory: `<td data-column="memory" class="num mono">${formatBytes(item.memory_bytes || 0)}</td>`,
+    gpu: `<td data-column="gpu" class="num mono">${gpuLabel}</td>`,
+    disk: `<td data-column="disk" class="num mono">${ratePair(item.read_bytes_per_s || 0, item.write_bytes_per_s || 0)}</td>`,
+    network: `<td data-column="network" class="num mono">${ratePair(network.down, network.up)}</td>`,
+    threads: `<td data-column="threads" class="num mono">${formatNumber(item.threads || 0)}</td>`,
+    age: `<td data-column="age" class="num mono">${formatDuration(item.age_seconds || 0)}</td>`,
   };
   return `<tr class="process-row ${treeDepth === null ? "" : "tree-row"}" data-pid="${Number(item.pid || 0)}" tabindex="0">${selectedProcessColumns(mode).map((key) => cells[key] || "").join("")}</tr>`;
 }
@@ -1000,6 +1009,7 @@ function renderProcesses(snapshot) {
     processSearchMatch(item, mode) && processScopeMatch(item, mode) && processStatusMatch(item, mode)
   ), mode);
   const visible = filtered.slice(0, state.processLimit);
+  el.processTable.dataset.mode = mode;
   el.processTableHead.innerHTML = renderProcessHead(mode);
   el.processTableBody.innerHTML = visible.length
     ? visible.map((row) => mode === "programs" ? renderProgramRow(row) : mode === "tree" ? renderProcessRow(row.item, row.depth, row.hasChildren) : renderProcessRow(row)).join("")
@@ -1434,6 +1444,7 @@ async function saveThresholds() {
 function normalizePreferences(value = {}) {
   const defaults = {
     density: "compact",
+    font_size: "medium",
     language: "en",
     theme: "deep",
     performance_mode: "balanced",
@@ -1471,6 +1482,7 @@ function normalizePreferences(value = {}) {
   });
   return {
     density,
+    font_size: ["small", "medium", "large"].includes(value.font_size) ? value.font_size : defaults.font_size,
     language: ["en", "zh-CN"].includes(value.language) ? value.language : defaults.language,
     theme: ["light", "warm", "mint", "dark", "deep"].includes(value.theme) ? value.theme : defaults.theme,
     performance_mode: Object.hasOwn(PERFORMANCE_INTERVALS, value.performance_mode) ? value.performance_mode : defaults.performance_mode,
@@ -1484,15 +1496,15 @@ function normalizePreferences(value = {}) {
   };
 }
 
-function renderSectionOrderControls() {
-  el.sectionOrderList.innerHTML = state.preferences.section_order.map((id, index, order) => {
+function renderSectionOrderControls(order = state.preferences.section_order) {
+  el.sectionOrderList.innerHTML = order.map((id, index, currentOrder) => {
     const label = SECTION_LABELS[id] || id;
     return `<div class="section-order-row">
       <span class="section-order-index">${String(index + 1).padStart(2, "0")}</span>
       <span class="section-order-name">${escapeHtml(label)}</span>
       <span class="section-order-actions">
         <button class="order-btn" data-section-move="${escapeHtml(id)}" data-move-direction="-1" type="button" aria-label="Move ${escapeHtml(label)} up" ${index === 0 ? "disabled" : ""}>↑</button>
-        <button class="order-btn" data-section-move="${escapeHtml(id)}" data-move-direction="1" type="button" aria-label="Move ${escapeHtml(label)} down" ${index === order.length - 1 ? "disabled" : ""}>↓</button>
+        <button class="order-btn" data-section-move="${escapeHtml(id)}" data-move-direction="1" type="button" aria-label="Move ${escapeHtml(label)} down" ${index === currentOrder.length - 1 ? "disabled" : ""}>↓</button>
       </span>
     </div>`;
   }).join("");
@@ -1504,7 +1516,6 @@ function applySectionOrder() {
     const section = main.querySelector(`[data-dashboard-order="${id}"]`);
     if (section) main.appendChild(section);
   });
-  renderSectionOrderControls();
 }
 
 function applyPreferences(preferences, rerender = true) {
@@ -1512,23 +1523,15 @@ function applyPreferences(preferences, rerender = true) {
   const previousPerformanceMode = state.preferences.performance_mode;
   state.preferences = normalizePreferences(preferences);
   document.body.dataset.density = state.preferences.density;
+  document.documentElement.dataset.fontSize = state.preferences.font_size;
   document.documentElement.dataset.performanceMode = state.preferences.performance_mode;
+  try { localStorage.setItem("see-aicoding-font-size", state.preferences.font_size); } catch {}
   applyTheme();
   applySectionOrder();
   document.querySelectorAll("[data-dashboard-section]").forEach((section) => {
     section.hidden = state.preferences.hidden_sections.includes(section.dataset.dashboardSection);
   });
-  document.querySelectorAll("[data-section-toggle]").forEach((input) => {
-    input.checked = !state.preferences.hidden_sections.includes(input.dataset.sectionToggle);
-  });
-  document.querySelectorAll('input[name="dashboardDensity"]').forEach((input) => {
-    input.checked = input.value === state.preferences.density;
-  });
-  document.querySelectorAll("[data-process-column]").forEach((input) => {
-    input.checked = state.preferences.process_columns.includes(input.dataset.processColumn);
-  });
   el.showIdleAiToggle.checked = state.preferences.show_idle_ai;
-  el.showQuotaCardsSetting.checked = state.preferences.show_quota_cards;
   el.quotaGrid.hidden = !state.preferences.show_quota_cards;
   el.refreshQuotas.hidden = !state.preferences.show_quota_cards;
   el.toggleQuotaVisibility.textContent = state.preferences.show_quota_cards
@@ -1538,14 +1541,7 @@ function applyPreferences(preferences, rerender = true) {
   if (!state.preferences.show_quota_cards) {
     window.clearTimeout(state.quotaRefreshTimer);
   }
-  el.languageSelect.value = state.preferences.language;
-  el.themeSelect.value = state.preferences.theme;
-  el.performanceMode.value = state.preferences.performance_mode;
-  document.querySelectorAll("[data-quota-provider]").forEach((input) => {
-    const key = `${input.dataset.quotaWindow}_used_percent`;
-    const value = state.preferences.provider_quotas[input.dataset.quotaProvider]?.[key];
-    input.value = value === null || value === undefined ? "" : String(value);
-  });
+  if (!el.customizeMenu.open || !state.settingsDirty) syncPreferenceControls(state.preferences);
   if (rerender && state.snapshot) {
     renderAll();
   }
@@ -1573,27 +1569,31 @@ async function fetchPreferences() {
   }
 }
 
-function schedulePreferenceSave() {
-  clearTimeout(state.preferenceTimer);
-  state.preferenceTimer = window.setTimeout(async () => {
-    try {
-      const response = await fetch("/api/dashboard-preferences", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preferences: state.preferences }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-      applyPreferences(payload.preferences || state.preferences, false);
-      if (state.preferences.show_quota_cards) fetchProviderUsage();
-      else window.clearTimeout(state.quotaRefreshTimer);
-    } catch (error) {
-      showToast(error.message || "Could not save dashboard preferences", true);
-    }
-  }, 180);
+function syncPreferenceControls(preferences) {
+  const value = normalizePreferences(preferences);
+  document.querySelectorAll("[data-section-toggle]").forEach((input) => {
+    input.checked = !value.hidden_sections.includes(input.dataset.sectionToggle);
+  });
+  document.querySelectorAll('input[name="dashboardDensity"]').forEach((input) => {
+    input.checked = input.value === value.density;
+  });
+  document.querySelectorAll("[data-process-column]").forEach((input) => {
+    input.checked = value.process_columns.includes(input.dataset.processColumn);
+  });
+  el.showQuotaCardsSetting.checked = value.show_quota_cards;
+  el.languageSelect.value = value.language;
+  el.themeSelect.value = value.theme;
+  el.fontSizeSelect.value = value.font_size;
+  el.performanceMode.value = value.performance_mode;
+  document.querySelectorAll("[data-quota-provider]").forEach((input) => {
+    const key = `${input.dataset.quotaWindow}_used_percent`;
+    const used = value.provider_quotas[input.dataset.quotaProvider]?.[key];
+    input.value = used === null || used === undefined ? "" : String(Number((100 - used).toFixed(1)));
+  });
+  renderSectionOrderControls(value.section_order);
 }
 
-function updatePreferencesFromControls() {
+function readPreferencesFromControls() {
   const hidden = [...document.querySelectorAll("[data-section-toggle]")]
     .filter((input) => !input.checked)
     .map((input) => input.dataset.sectionToggle);
@@ -1608,32 +1608,90 @@ function updatePreferencesFromControls() {
   };
   document.querySelectorAll("[data-quota-provider]").forEach((input) => {
     const key = `${input.dataset.quotaWindow}_used_percent`;
-    providerQuotas[input.dataset.quotaProvider][key] = input.value.trim() === "" ? null : Number(input.value);
+    if (input.value.trim() === "") {
+      providerQuotas[input.dataset.quotaProvider][key] = null;
+      return;
+    }
+    const remaining = clamp(Number(input.value));
+    providerQuotas[input.dataset.quotaProvider][key] = Number((100 - remaining).toFixed(1));
   });
-  applyPreferences({
+  return normalizePreferences({
     density,
+    font_size: el.fontSizeSelect.value,
     language: el.languageSelect.value,
     theme: el.themeSelect.value,
     performance_mode: el.performanceMode.value,
     hidden_sections: hidden,
-    show_idle_ai: el.showIdleAiToggle.checked,
+    show_idle_ai: state.preferences.show_idle_ai,
     show_quota_cards: el.showQuotaCardsSetting.checked,
-    section_order: state.preferences.section_order,
+    section_order: state.settingsDraft?.section_order || state.preferences.section_order,
     process_columns: columns,
     provider_quotas: providerQuotas,
     quota_updated_at: state.preferences.quota_updated_at,
   });
-  schedulePreferenceSave();
+}
+
+function beginSettingsDraft() {
+  state.settingsDraft = normalizePreferences(state.preferences);
+  state.settingsDirty = false;
+  el.savePreferences.disabled = true;
+  syncPreferenceControls(state.settingsDraft);
+  if (state.preferences.language === "zh-CN") localizeDom(el.customizeMenu);
+}
+
+function markSettingsDirty() {
+  if (!state.settingsDraft) beginSettingsDraft();
+  state.settingsDraft = readPreferencesFromControls();
+  state.settingsDirty = true;
+  el.savePreferences.disabled = false;
+}
+
+async function persistPreferences(preferences, rerender = true) {
+  const response = await fetch("/api/dashboard-preferences", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ preferences }),
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+  applyPreferences(payload.preferences || preferences, rerender);
+  if (state.preferences.show_quota_cards) fetchProviderUsage();
+  else window.clearTimeout(state.quotaRefreshTimer);
+  return state.preferences;
+}
+
+async function saveSettings() {
+  if (state.preferenceSaveInFlight || !state.settingsDirty) return;
+  state.preferenceSaveInFlight = true;
+  el.savePreferences.disabled = true;
+  try {
+    const preferences = readPreferencesFromControls();
+    await persistPreferences(preferences);
+    state.settingsDraft = normalizePreferences(state.preferences);
+    state.settingsDirty = false;
+    syncPreferenceControls(state.settingsDraft);
+    el.customizeMenu.open = false;
+    showToast(localized("Dashboard preferences saved", "看板设置已保存"));
+  } catch (error) {
+    el.savePreferences.disabled = false;
+    showToast(error.message || localized("Could not save dashboard preferences", "无法保存看板设置"), true);
+  } finally {
+    state.preferenceSaveInFlight = false;
+  }
 }
 
 function moveDashboardSection(id, direction) {
-  const order = [...state.preferences.section_order];
+  if (!state.settingsDraft) beginSettingsDraft();
+  const order = [...state.settingsDraft.section_order];
   const index = order.indexOf(id);
   const nextIndex = index + Number(direction || 0);
   if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return;
   [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
-  applyPreferences({ ...state.preferences, section_order: order }, false);
-  schedulePreferenceSave();
+  state.settingsDraft = { ...readPreferencesFromControls(), section_order: order };
+  state.settingsDirty = true;
+  el.savePreferences.disabled = false;
+  renderSectionOrderControls(order);
+  if (state.preferences.language === "zh-CN") localizeDom(el.sectionOrderList);
 }
 
 function quotaLocale(english, chinese) {
@@ -1735,18 +1793,21 @@ function renderProviderUsage(model) {
       <div class="quota-card-head"><h3>${escapeHtml(provider.display_name)}</h3><span>${escapeHtml(quotaProviderStatus(provider))}</span></div>
       <div class="quota-windows">${windows.map((windowModel) => {
         const used = windowModel.used_percent;
-        const remaining = windowModel.remaining_percent;
-        const available = used !== null && used !== undefined;
+        const reportedRemaining = windowModel.remaining_percent;
+        const remaining = reportedRemaining !== null && reportedRemaining !== undefined
+          ? Number(reportedRemaining)
+          : used !== null && used !== undefined ? 100 - Number(used) : null;
+        const available = remaining !== null && remaining !== undefined && Number.isFinite(remaining);
         const windowLabel = quotaWindowLabel(windowModel);
         const resetLabel = windowModel.resets_at
           ? `${quotaLocale("Resets", "重置")} ${formatEventTime(windowModel.resets_at)}`
           : quotaLocale("Reset time unavailable", "重置时间不可用");
         const progressValue = available
-          ? `aria-valuenow="${clamp(used)}"`
+          ? `aria-valuenow="${clamp(remaining)}"`
           : `aria-valuetext="${quotaLocale("Unavailable", "不可用")}"`;
         return `<div class="quota-window">
-          <div class="quota-gauge" style="--gauge-value:${clamp(used || 0)}%" role="progressbar" aria-label="${escapeHtml(provider.display_name)} ${escapeHtml(windowLabel)} ${quotaLocale("used", "已用")}" aria-valuemin="0" aria-valuemax="100" ${progressValue}><span>${available ? `${Math.round(used)}%` : "--"}</span></div>
-          <div class="quota-window-copy"><b>${escapeHtml(windowLabel)}</b><span>${quotaLocale("Remaining", "剩余")} ${remaining === null || remaining === undefined ? "--" : formatPct(remaining)}</span><small title="${escapeHtml(resetLabel)}">${escapeHtml(resetLabel)}</small></div>
+          <div class="quota-gauge" style="--gauge-value:${available ? clamp(remaining) : 0}%" role="progressbar" aria-label="${escapeHtml(provider.display_name)} ${escapeHtml(windowLabel)} ${quotaLocale("remaining", "剩余")}" aria-valuemin="0" aria-valuemax="100" ${progressValue}><span>${available ? `${Math.round(remaining)}%` : "--"}</span></div>
+          <div class="quota-window-copy"><b>${escapeHtml(windowLabel)}</b><span>${quotaLocale("Used", "已用")} ${used === null || used === undefined ? "--" : formatPct(used)}</span><small title="${escapeHtml(resetLabel)}">${escapeHtml(resetLabel)}</small></div>
         </div>`;
       }).join("")}</div>
       <div class="quota-card-foot"><span>${escapeHtml(quotaSourceLabel(provider.source?.kind))}</span><span>${provider.observed_at ? formatEventTime(provider.observed_at) : "--"}</span></div>
@@ -1776,8 +1837,12 @@ function scheduleQuotaRefreshPoll() {
 
 async function fetchProviderUsage(force = false, polling = false) {
   if (!state.preferences.show_quota_cards) return;
-  if (state.quotaRequestInFlight) return;
+  if (state.quotaRequestInFlight) {
+    state.quotaRefreshQueued = true;
+    return;
+  }
   state.quotaRequestInFlight = true;
+  state.quotaRefreshQueued = false;
   if (force) {
     state.quotaRefreshAttempts = 0;
     window.clearTimeout(state.quotaRefreshTimer);
@@ -1814,6 +1879,10 @@ async function fetchProviderUsage(force = false, polling = false) {
   }
   renderProviderUsage(state.providerUsage);
   scheduleQuotaRefreshPoll();
+  if (state.quotaRefreshQueued) {
+    state.quotaRefreshQueued = false;
+    fetchProviderUsage(false, true);
+  }
 }
 
 function renderAiProjects(projects) {
@@ -2239,6 +2308,10 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     openProcess(event.target.dataset.pid);
   }
+  if (event.key === "Escape" && el.customizeMenu.open) {
+    el.customizeMenu.open = false;
+    return;
+  }
   if (event.key === "Escape" && state.selectedPid) closeProcess();
 });
 
@@ -2290,14 +2363,15 @@ el.showMoreProcesses.addEventListener("click", () => {
 el.saveThresholds.addEventListener("click", saveThresholds);
 
 document.addEventListener("change", (event) => {
-  if (event.target.matches("[data-section-toggle], [data-process-column], [data-quota-provider], input[name='dashboardDensity'], #showIdleAiToggle, #showQuotaCardsSetting, #languageSelect, #themeSelect, #performanceMode")) {
-    updatePreferencesFromControls();
+  if (event.target.closest(".customize-popover") && event.target.matches("[data-section-toggle], [data-process-column], [data-quota-provider], input[name='dashboardDensity'], #showQuotaCardsSetting, #languageSelect, #themeSelect, #fontSizeSelect, #performanceMode")) {
+    markSettingsDirty();
   }
 });
 
 el.resetPreferences.addEventListener("click", () => {
-  applyPreferences({
+  state.settingsDraft = normalizePreferences({
     density: "compact",
+    font_size: "medium",
     language: "en",
     theme: "deep",
     performance_mode: "balanced",
@@ -2312,8 +2386,39 @@ el.resetPreferences.addEventListener("click", () => {
       cursor: { five_hour_used_percent: null, weekly_used_percent: null },
     },
   });
-  schedulePreferenceSave();
-  showToast("Dashboard preferences reset");
+  state.settingsDirty = true;
+  syncPreferenceControls(state.settingsDraft);
+  if (state.preferences.language === "zh-CN") localizeDom(el.customizeMenu);
+  el.savePreferences.disabled = false;
+  showToast(localized("Defaults ready. Click Save to apply.", "已恢复默认草稿，点击保存后生效。"));
+});
+
+el.savePreferences.addEventListener("click", saveSettings);
+
+el.customizeMenu.addEventListener("toggle", () => {
+  if (el.customizeMenu.open) {
+    beginSettingsDraft();
+    return;
+  }
+  state.settingsDraft = null;
+  state.settingsDirty = false;
+  el.savePreferences.disabled = true;
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (el.customizeMenu.open && !event.target.closest("#customizeMenu")) {
+    el.customizeMenu.open = false;
+  }
+});
+
+el.showIdleAiToggle.addEventListener("change", async () => {
+  const requested = el.showIdleAiToggle.checked;
+  try {
+    await persistPreferences({ ...state.preferences, show_idle_ai: requested });
+  } catch (error) {
+    el.showIdleAiToggle.checked = state.preferences.show_idle_ai;
+    showToast(error.message || localized("Could not save dashboard preferences", "无法保存看板设置"), true);
+  }
 });
 
 el.serviceSearch.addEventListener("input", (event) => {
@@ -2325,12 +2430,18 @@ el.refreshServices.addEventListener("click", () => fetchServices(true));
 el.refreshNetwork.addEventListener("click", () => fetchNetwork(true));
 el.refreshContainers.addEventListener("click", () => fetchContainers(true));
 el.refreshQuotas.addEventListener("click", () => fetchProviderUsage(true));
-el.toggleQuotaVisibility.addEventListener("click", () => {
-  applyPreferences({
-    ...state.preferences,
-    show_quota_cards: !state.preferences.show_quota_cards,
-  });
-  schedulePreferenceSave();
+el.toggleQuotaVisibility.addEventListener("click", async () => {
+  el.toggleQuotaVisibility.disabled = true;
+  try {
+    await persistPreferences({
+      ...state.preferences,
+      show_quota_cards: !state.preferences.show_quota_cards,
+    });
+  } catch (error) {
+    showToast(error.message || localized("Could not save dashboard preferences", "无法保存看板设置"), true);
+  } finally {
+    el.toggleQuotaVisibility.disabled = false;
+  }
 });
 
 el.closeDetails.addEventListener("click", closeProcess);
