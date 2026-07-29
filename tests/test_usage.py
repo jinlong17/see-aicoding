@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from see_aicoding.usage import (
+    CLAUDE_STALE_SECONDS,
     CodexRateLimitSource,
     ClaudeStatusLineSource,
     UsageSourceError,
@@ -335,6 +336,30 @@ class UsageSourceTests(unittest.TestCase):
             run.call_args.args[0],
             ["/mock/claude", "auth", "status", "--json"],
         )
+
+    def test_claude_snapshot_goes_stale_after_two_hours(self) -> None:
+        self.assertEqual(CLAUDE_STALE_SECONDS, 2 * 60 * 60)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "claude-usage.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "captured_at": time.time() - CLAUDE_STALE_SECONDS - 60,
+                        "last_invoked_at": time.time() - CLAUDE_STALE_SECONDS - 60,
+                        "invocations": 3,
+                        "responses_seen": 2,
+                        "rate_limits": {"five_hour": {"used_percentage": 20}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = ClaudeStatusLineSource(path).collect()
+
+            self.assertEqual(result["status"], "stale")
+            self.assertEqual(result["windows"][0]["used_percent"], 20.0)
+            self.assertIn("2 hours old", result["reason"])
 
     @staticmethod
     def _configured_settings(root: Path) -> Path:

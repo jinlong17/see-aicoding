@@ -21,7 +21,9 @@ DEFAULT_TIMEOUT_SECONDS = 8.0
 DEFAULT_RETRY_SECONDS = 30.0
 MAX_RETRY_SECONDS = 600.0
 FORCE_REFRESH_COOLDOWN_SECONDS = 10.0
-CLAUDE_STALE_SECONDS = 24 * 60 * 60
+# Quota only advances while a Claude Code CLI session renders its status line,
+# so a snapshot goes stale well before a full day of desktop-only work.
+CLAUDE_STALE_SECONDS = 2 * 60 * 60
 CLAUDE_WRITE_DEDUP_SECONDS = 60.0
 CLAUDE_AUTH_CACHE_SECONDS = 15 * 60.0
 CLAUDE_AUTH_TIMEOUT_SECONDS = 3.0
@@ -639,7 +641,8 @@ class ClaudeStatusLineSource:
             observed_at=observed_at,
             stale_after_seconds=CLAUDE_STALE_SECONDS,
             reason=(
-                "Claude quota snapshot is more than 24 hours old."
+                "Claude quota snapshot is more than 2 hours old; open a Claude "
+                "Code CLI session to refresh it."
                 if stale
                 else None
             ),
