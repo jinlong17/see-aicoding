@@ -8,6 +8,7 @@ Layout:
 """
 from __future__ import annotations
 
+import functools
 import getpass
 import platform
 import shutil
@@ -222,8 +223,9 @@ class ResourceGroup:
         return len(self.procs)
 
 
-def app_bundle_label(proc: ProcSample) -> str:
-    for source in (proc.exe, proc.cmdline_str):
+@functools.lru_cache(maxsize=4096)
+def _app_bundle_label(exe: str, cmdline: str) -> str:
+    for source in (exe, cmdline):
         parts = Path(source).parts
         for part in parts:
             if part.endswith(".app"):
@@ -231,19 +233,33 @@ def app_bundle_label(proc: ProcSample) -> str:
     return ""
 
 
-def resource_group_label(proc: ProcSample) -> str:
-    bundle = app_bundle_label(proc)
+def app_bundle_label(proc: ProcSample) -> str:
+    return _app_bundle_label(proc.exe, proc.cmdline_str)
+
+
+@functools.lru_cache(maxsize=4096)
+def _resource_group_label(name: str, exe: str, cmdline: str, fallback_label: str) -> str:
+    bundle = _app_bundle_label(exe, cmdline)
     if bundle:
         return bundle
-    name = proc.name or resource_proc_label(proc)
-    if name in {"node", "python", "python3"}:
-        return resource_proc_label(proc)
+    resolved_name = name or fallback_label
+    if resolved_name in {"node", "python", "python3"}:
+        return fallback_label
     for marker in (" Helper", " Web Content"):
-        if marker in name:
-            return name.split(marker, 1)[0]
-    if name.endswith(" Renderer"):
-        return name.rsplit(" Renderer", 1)[0]
-    return name
+        if marker in resolved_name:
+            return resolved_name.split(marker, 1)[0]
+    if resolved_name.endswith(" Renderer"):
+        return resolved_name.rsplit(" Renderer", 1)[0]
+    return resolved_name
+
+
+def resource_group_label(proc: ProcSample) -> str:
+    return _resource_group_label(
+        proc.name,
+        proc.exe,
+        proc.cmdline_str,
+        resource_proc_label(proc),
+    )
 
 
 def build_resource_groups(procs: list[ProcSample]) -> list[ResourceGroup]:

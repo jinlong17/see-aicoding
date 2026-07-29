@@ -123,6 +123,11 @@ PATTERNS_MCP = (
 def classify(p: "ProcSample") -> str:
     """Order matters: most specific first."""
     hay = p.cmdline_str or p.exe or p.name
+    return _classify_haystack(hay)
+
+
+@functools.lru_cache(maxsize=4096)
+def _classify_haystack(hay: str) -> str:
     if "chrome_crashpad_handler" in hay:
         return KIND_CHILD
     for pat in PATTERNS_CLAUDE_CURSOR:
@@ -483,7 +488,11 @@ class Sampler:
         self._create_times: dict[int, float] = {}
         self._io_counters: dict[int, tuple[int, int, float]] = {}
         self._static_info: dict[int, tuple[float, dict[str, object]]] = {}
+        self._dynamic_info: dict[int, tuple[float, dict[str, object]]] = {}
         self._static_refresh_s = 30.0
+        self._dynamic_refresh_s = 5.0
+        self._system_memory_total = psutil.virtual_memory().total
+        self._process_io_supported = hasattr(psutil.Process, "io_counters")
 
     def _get(self, pid: int) -> psutil.Process | None:
         proc = self._cache.get(pid)
@@ -497,6 +506,7 @@ class Sampler:
             self._create_times.pop(pid, None)
             self._io_counters.pop(pid, None)
             self._static_info.pop(pid, None)
+            self._dynamic_info.pop(pid, None)
         try:
             proc = psutil.Process(pid)
             self._cache[pid] = proc
@@ -510,6 +520,7 @@ class Sampler:
         out: dict[int, ProcSample] = {}
         alive: set[int] = set()
         username = os.environ.get("USER") or None
+        snapshot_now = time.monotonic()
         for proc in psutil.process_iter(["pid"]):
             try:
                 pid = proc.info["pid"]
@@ -517,10 +528,13 @@ class Sampler:
                 p = self._get(pid)
                 if p is None:
                     continue
-                now = time.monotonic()
                 cached_static = self._static_info.get(pid)
+                cached_dynamic = self._dynamic_info.get(pid)
                 with p.oneshot():
-                    if cached_static is None or now - cached_static[0] >= self._static_refresh_s:
+                    if (
+                        cached_static is None
+                        or snapshot_now - cached_static[0] >= self._static_refresh_s
+                    ):
                         try:
                             cmd_list = p.cmdline()
                         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -541,7 +555,7 @@ class Sampler:
                             "cwd": cwd,
                             "username": p.username(),
                         }
-                        self._static_info[pid] = (now, static_info)
+                        self._static_info[pid] = (snapshot_now, static_info)
                     else:
                         static_info = cached_static[1]
                     proc_username = str(static_info["username"])
@@ -555,32 +569,53 @@ class Sampler:
                         memory_info = p.memory_info()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         memory_info = None
-                    try:
-                        threads = p.num_threads()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        threads = 0
-                    try:
-                        status = p.status()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        status = "unknown"
-                    try:
-                        memory_percent = p.memory_percent()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        memory_percent = 0.0
-                    try:
-                        cpu_times = p.cpu_times()
-                        cpu_time_seconds = float(cpu_times.user + cpu_times.system)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        cpu_time_seconds = 0.0
-                    try:
-                        io_counters = p.io_counters()
-                        read_bytes = int(io_counters.read_bytes)
-                        write_bytes = int(io_counters.write_bytes)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                    if (
+                        cached_dynamic is None
+                        or snapshot_now - cached_dynamic[0] >= self._dynamic_refresh_s
+                    ):
+                        try:
+                            threads = p.num_threads()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            threads = 0
+                        try:
+                            status = p.status()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            status = "unknown"
+                        try:
+                            cpu_times = p.cpu_times()
+                            cpu_time_seconds = float(cpu_times.user + cpu_times.system)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            cpu_time_seconds = 0.0
+                        dynamic_info: dict[str, object] = {
+                            "threads": threads,
+                            "status": status,
+                            "cpu_time_seconds": cpu_time_seconds,
+                        }
+                        self._dynamic_info[pid] = (snapshot_now, dynamic_info)
+                    else:
+                        dynamic_info = cached_dynamic[1]
+                        threads = int(dynamic_info["threads"])
+                        status = str(dynamic_info["status"])
+                        cpu_time_seconds = float(dynamic_info["cpu_time_seconds"])
+                    rss = memory_info.rss if memory_info else 0
+                    memory_percent = (
+                        rss / self._system_memory_total * 100.0
+                        if self._system_memory_total
+                        else 0.0
+                    )
+                    if self._process_io_supported:
+                        try:
+                            io_counters = p.io_counters()
+                            read_bytes = int(io_counters.read_bytes)
+                            write_bytes = int(io_counters.write_bytes)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                            read_bytes = 0
+                            write_bytes = 0
+                    else:
                         read_bytes = 0
                         write_bytes = 0
 
-                    sampled_at = time.monotonic()
+                    sampled_at = snapshot_now
                     previous_io = self._io_counters.get(pid)
                     read_rate = 0.0
                     write_rate = 0.0
@@ -599,7 +634,7 @@ class Sampler:
                         create_time=self._create_times.get(pid, 0.0),
                         cwd=str(static_info["cwd"]) if static_info["cwd"] is not None else None,
                         cpu_percent=p.cpu_percent(interval=None),
-                        rss=memory_info.rss if memory_info else 0,
+                        rss=rss,
                         vms=memory_info.vms if memory_info else 0,
                         memory_percent=memory_percent,
                         num_threads=threads,
@@ -620,6 +655,7 @@ class Sampler:
             self._create_times.pop(dead, None)
             self._io_counters.pop(dead, None)
             self._static_info.pop(dead, None)
+            self._dynamic_info.pop(dead, None)
         return out
 
 

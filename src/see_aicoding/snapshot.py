@@ -204,6 +204,7 @@ def _session_to_dict(
     session: Session,
     gpu_by_pid: dict[int, dict[str, Any]] | None = None,
     disk_by_path: dict[str, dict[str, Any]] | None = None,
+    compact: bool = False,
 ) -> dict[str, Any]:
     gpu_by_pid = gpu_by_pid or {}
     label, color = KIND_META.get(session.kind, (session.kind, "#A1ACB8"))
@@ -222,7 +223,46 @@ def _session_to_dict(
         item.get("status") in {"pending", "measuring"} for item in disk_values
     )
     disk_unavailable = sum(item.get("status") == "unavailable" for item in disk_values)
-    return {
+    descendants = sorted(session.descendants, key=lambda p: -p.create_time)
+    if compact:
+        children = []
+        for proc in descendants[:10]:
+            item = _proc_to_dict(
+                proc,
+                full_cmdline=False,
+                gpu_process=gpu_by_pid.get(proc.pid),
+            )
+            children.append(
+                {
+                    key: item[key]
+                    for key in (
+                        "pid",
+                        "name",
+                        "label",
+                        "cmdline",
+                        "age_seconds",
+                        "age_label",
+                        "cpu_capacity_percent",
+                        "memory_bytes",
+                        "status",
+                    )
+                }
+            )
+        root = {"pid": session.root.pid}
+    else:
+        children = [
+            _proc_to_dict(
+                proc,
+                full_cmdline=False,
+                gpu_process=gpu_by_pid.get(proc.pid),
+            )
+            for proc in descendants
+        ]
+        root = _proc_to_dict(
+            session.root,
+            gpu_process=gpu_by_pid.get(session.root.pid),
+        )
+    result = {
         "id": session.session_id,
         "kind": session.kind,
         "kind_label": label,
@@ -234,15 +274,8 @@ def _session_to_dict(
             _project_to_dict(project, disk_by_path=disk_by_path)
             for project in session.project_stats
         ],
-        "root": _proc_to_dict(session.root, gpu_process=gpu_by_pid.get(session.root.pid)),
-        "children": [
-            _proc_to_dict(
-                proc,
-                full_cmdline=False,
-                gpu_process=gpu_by_pid.get(proc.pid),
-            )
-            for proc in sorted(session.descendants, key=lambda p: -p.create_time)
-        ],
+        "root": root,
+        "children": children,
         "cpu_percent": session.total_cpu,
         "cpu_capacity_percent": _cpu_capacity(session.total_cpu),
         "memory_bytes": session.total_rss,
@@ -264,6 +297,9 @@ def _session_to_dict(
         "status": _session_status(session),
         "active": active,
     }
+    if compact:
+        result["child_count"] = len(descendants)
+    return result
 
 
 def _zone_to_dict(
@@ -272,6 +308,7 @@ def _zone_to_dict(
     history: History,
     gpu_by_pid: dict[int, dict[str, Any]] | None = None,
     disk_by_path: dict[str, dict[str, Any]] | None = None,
+    compact: bool = False,
 ) -> dict[str, Any]:
     title, color, marker = ZONE_META[zone_id]
     zone_sessions = [session for session in sessions if session.zone == zone_id]
@@ -344,6 +381,7 @@ def _zone_to_dict(
                 session,
                 gpu_by_pid=gpu_by_pid,
                 disk_by_path=disk_by_path,
+                compact=compact,
             )
             for session in zone_sessions
         ],
@@ -431,6 +469,22 @@ def _resource_group_to_dict(
     return data
 
 
+def _compact_leader(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: item.get(key)
+        for key in (
+            "label",
+            "primary_pid",
+            "process_count",
+            "cpu_capacity_percent",
+            "memory_bytes",
+            "gpu_percent",
+            "gpu_memory_bytes",
+        )
+        if key in item
+    }
+
+
 def build_snapshot(
     sessions: list[Session],
     procs: dict[int, ProcSample],
@@ -440,15 +494,23 @@ def build_snapshot(
     system_metrics: dict[str, Any] | None = None,
     observability: dict[str, Any] | None = None,
     workload_storage: dict[str, Any] | None = None,
+    compact: bool = False,
+    generated_at: float | None = None,
 ) -> dict[str, Any]:
     """Build a browser-friendly snapshot from monitor samples."""
-    now = time.time()
+    now = time.time() if generated_at is None else float(generated_at)
     active_sessions = [session for session in sessions if session.total_cpu >= IDLE_CPU_THRESHOLD]
     total_cpu = sum(session.total_cpu for session in active_sessions)
     total_mem = sum(session.total_rss for session in active_sessions)
     process_count = sum(session.proc_count for session in active_sessions)
-    vm = psutil.virtual_memory()
-    mem_used = max(0, vm.total - vm.available)
+    memory_metrics = (system_metrics or {}).get("memory") or {}
+    system_memory_total = int(memory_metrics.get("total_bytes") or 0)
+    system_memory_available = int(memory_metrics.get("available_bytes") or 0)
+    if system_memory_total <= 0:
+        vm = psutil.virtual_memory()
+        system_memory_total = vm.total
+        system_memory_available = vm.available
+    mem_used = max(0, system_memory_total - system_memory_available)
     all_procs = list(procs.values())
     resource_groups = build_resource_groups(all_procs)
     gpu = (system_metrics or {}).get("gpu") or {}
@@ -462,32 +524,51 @@ def build_snapshot(
         for item in (workload_storage or {}).get("items", [])
         if item.get("path")
     }
-    program_items = [
-        _resource_group_to_dict(
-            group,
-            gpu_by_pid=gpu_by_pid,
-            include_members=False,
-            system_memory_total=vm.total,
-        )
-        for group in resource_groups
-    ]
     top_memory = sorted(resource_groups, key=lambda g: (-g.rss, -g.cpu_percent, g.label))[:5]
     top_cpu = sorted(
         resource_groups,
         key=lambda g: (-(g.cpu_percent / LOGICAL_CPU_COUNT), -g.rss, g.label),
     )[:5]
-    top_disk = sorted(
-        program_items,
-        key=lambda item: (
-            -(item["read_bytes_per_s"] + item["write_bytes_per_s"]),
-            -item["memory_bytes"],
-            item["label"],
-        ),
-    )[:5]
+    if compact:
+        program_items: list[dict[str, Any]] = []
+        top_disk: list[dict[str, Any]] = []
+        gpu_groups = [
+            group
+            for group in resource_groups
+            if any(proc.pid in gpu_by_pid for proc in group.procs)
+        ]
+    else:
+        program_items = [
+            _resource_group_to_dict(
+                group,
+                gpu_by_pid=gpu_by_pid,
+                include_members=False,
+                system_memory_total=system_memory_total,
+            )
+            for group in resource_groups
+        ]
+        top_disk = sorted(
+            program_items,
+            key=lambda item: (
+                -(item["read_bytes_per_s"] + item["write_bytes_per_s"]),
+                -item["memory_bytes"],
+                item["label"],
+            ),
+        )[:5]
+        gpu_groups = resource_groups
+    gpu_items = [
+        _resource_group_to_dict(
+            group,
+            gpu_by_pid=gpu_by_pid,
+            include_members=False,
+            system_memory_total=system_memory_total,
+        )
+        for group in gpu_groups
+    ]
     top_gpu = sorted(
         [
             item
-            for item in program_items
+            for item in gpu_items
             if item["gpu_memory_bytes"] or item["gpu_percent"] is not None
         ],
         key=lambda item: (
@@ -504,10 +585,14 @@ def build_snapshot(
             "physical_cpus": psutil.cpu_count(logical=False) or psutil.cpu_count() or 1,
             "cpu": {"percent": psutil.cpu_percent(interval=None), "per_core_percent": []},
             "memory": {
-                "total_bytes": vm.total,
-                "available_bytes": vm.available,
+                "total_bytes": system_memory_total,
+                "available_bytes": system_memory_available,
                 "used_bytes": mem_used,
-                "percent": (mem_used / vm.total * 100.0) if vm.total else 0.0,
+                "percent": (
+                    mem_used / system_memory_total * 100.0
+                    if system_memory_total
+                    else 0.0
+                ),
             },
             "swap": {},
             "gpu": gpu,
@@ -544,7 +629,25 @@ def build_snapshot(
     cpu = system_metrics.get("cpu") or {}
 
     total_history = list(history.total_cpu)
-    return {
+    top_memory_items = [
+        _resource_group_to_dict(
+            group,
+            gpu_by_pid=gpu_by_pid,
+            include_members=not compact,
+            system_memory_total=system_memory_total,
+        )
+        for group in top_memory
+    ]
+    top_cpu_items = [
+        _resource_group_to_dict(
+            group,
+            gpu_by_pid=gpu_by_pid,
+            include_members=not compact,
+            system_memory_total=system_memory_total,
+        )
+        for group in top_cpu
+    ]
+    snapshot = {
         "schema_version": 3,
         "generated_at": now,
         "generated_at_iso": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now)),
@@ -566,7 +669,11 @@ def build_snapshot(
             "cpu_percent": total_cpu,
             "cpu_capacity_percent": _cpu_capacity(total_cpu),
             "memory_bytes": total_mem,
-            "memory_percent": (total_mem / vm.total * 100.0) if vm.total else 0.0,
+            "memory_percent": (
+                total_mem / system_memory_total * 100.0
+                if system_memory_total
+                else 0.0
+            ),
             "history": total_history,
             "memory_history_mb": list(history.total_mem),
             "sparkline": sparkline(total_history, scale_max=max([100.0, *total_history])) if total_history else "",
@@ -584,6 +691,7 @@ def build_snapshot(
                 history,
                 gpu_by_pid=gpu_by_pid,
                 disk_by_path=disk_by_path,
+                compact=compact,
             ),
             _zone_to_dict(
                 ZONE_CODEX,
@@ -591,6 +699,7 @@ def build_snapshot(
                 history,
                 gpu_by_pid=gpu_by_pid,
                 disk_by_path=disk_by_path,
+                compact=compact,
             ),
             _zone_to_dict(
                 ZONE_CURSOR,
@@ -598,20 +707,13 @@ def build_snapshot(
                 history,
                 gpu_by_pid=gpu_by_pid,
                 disk_by_path=disk_by_path,
+                compact=compact,
             ),
-        ],
-        "sessions": [
-            _session_to_dict(
-                session,
-                gpu_by_pid=gpu_by_pid,
-                disk_by_path=disk_by_path,
-            )
-            for session in sessions
         ],
         "processes": {
             "scope": "system",
             "tree": _process_tree_metadata(all_procs),
-            "items": [
+            "items": [] if compact else [
                 _process_list_item(
                     proc,
                     gpu_process=gpu_by_pid.get(proc.pid),
@@ -624,30 +726,29 @@ def build_snapshot(
         },
         "resources": {
             "mode": "groups",
-            "programs": sorted(
+            "programs": [] if compact else sorted(
                 program_items,
                 key=lambda item: (-item["cpu_capacity_percent"], -item["memory_bytes"], item["label"]),
             ),
             "top_memory": [
-                _resource_group_to_dict(
-                    group,
-                    gpu_by_pid=gpu_by_pid,
-                    system_memory_total=vm.total,
-                )
-                for group in top_memory
-            ],
+                _compact_leader(item) for item in top_memory_items
+            ] if compact else top_memory_items,
             "top_cpu": [
-                _resource_group_to_dict(
-                    group,
-                    gpu_by_pid=gpu_by_pid,
-                    system_memory_total=vm.total,
-                )
-                for group in top_cpu
-            ],
+                _compact_leader(item) for item in top_cpu_items
+            ] if compact else top_cpu_items,
             "top_disk": top_disk,
-            "top_gpu": top_gpu,
+            "top_gpu": [
+                _compact_leader(item) for item in top_gpu
+            ] if compact else top_gpu,
         },
-        "observability": observability or {
+        "observability": (
+            {
+                **(observability or {}),
+                "events": ((observability or {}).get("events") or [])[:4],
+            }
+            if compact and observability
+            else observability
+        ) or {
             "summary": {"active": 0, "critical": 0, "warning": 0},
             "thresholds": {},
             "active": [],
@@ -655,3 +756,15 @@ def build_snapshot(
         },
         "extensions": [_extension_to_dict(ext) for ext in extensions],
     }
+    if compact:
+        snapshot["stream_compact"] = True
+    else:
+        snapshot["sessions"] = [
+            _session_to_dict(
+                session,
+                gpu_by_pid=gpu_by_pid,
+                disk_by_path=disk_by_path,
+            )
+            for session in sessions
+        ]
+    return snapshot

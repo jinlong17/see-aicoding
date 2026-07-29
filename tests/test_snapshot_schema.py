@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from see_aicoding.monitor import (
     KIND_CODEX_CLI,
@@ -68,14 +69,18 @@ class SystemSnapshotSchemaTests(unittest.TestCase):
             "battery": None,
         }
 
-        snapshot = build_snapshot(
-            sessions=[],
-            procs={proc.pid: proc},
-            history=history,
-            extensions=[],
-            refresh_s=1.5,
-            system_metrics=system_metrics,
-        )
+        with mock.patch(
+            "see_aicoding.snapshot.psutil.virtual_memory"
+        ) as virtual_memory:
+            snapshot = build_snapshot(
+                sessions=[],
+                procs={proc.pid: proc},
+                history=history,
+                extensions=[],
+                refresh_s=1.5,
+                system_metrics=system_metrics,
+            )
+        virtual_memory.assert_not_called()
 
         self.assertEqual(snapshot["schema_version"], 3)
         self.assertEqual(snapshot["system"]["cpu_percent"], 42)
@@ -159,6 +164,95 @@ class SystemSnapshotSchemaTests(unittest.TestCase):
         self.assertEqual(chatgpt_zone["disk_usage_status"], "available")
         self.assertEqual(chatgpt_zone["disk_usage_available_count"], 1)
         self.assertEqual(chatgpt_zone["disk_usage_project_count"], 1)
+
+    def test_compact_stream_omits_full_inventory_without_changing_full_schema(self):
+        root = ProcSample(
+            pid=5000,
+            ppid=1,
+            name="codex",
+            exe="/usr/local/bin/codex",
+            cmdline_str="codex app-server",
+            create_time=1,
+            cwd="/tmp/project",
+            cpu_percent=8,
+            rss=64 * 1024**2,
+            kind=KIND_CODEX_CLI,
+        )
+        children = [
+            ProcSample(
+                pid=5001 + index,
+                ppid=root.pid,
+                name=f"helper-{index}",
+                exe=f"/tmp/helper-{index}",
+                cmdline_str=f"/tmp/helper-{index} --serve",
+                create_time=100 + index,
+                cwd="/tmp/project",
+                cpu_percent=0.1,
+                rss=1024,
+            )
+            for index in range(12)
+        ]
+        session = Session(
+            session_id="codex_cli:5000",
+            kind=KIND_CODEX_CLI,
+            root=root,
+            project="project",
+            projects=["project"],
+            project_stats=[
+                ProjectSummary(
+                    name="project",
+                    path="/tmp/project",
+                    cpu=9.2,
+                    rss=root.rss + sum(child.rss for child in children),
+                    proc_count=13,
+                    latest_create_time=111,
+                )
+            ],
+            descendants=children,
+        )
+        observability = {
+            "summary": {"active": 0, "critical": 0, "warning": 0},
+            "thresholds": {},
+            "active": [],
+            "events": [{"id": index} for index in range(7)],
+        }
+
+        compact = build_snapshot(
+            sessions=[session],
+            procs={proc.pid: proc for proc in [root, *children]},
+            history=History(),
+            extensions=[],
+            refresh_s=3,
+            observability=observability,
+            compact=True,
+            generated_at=1234.5,
+        )
+        full = build_snapshot(
+            sessions=[session],
+            procs={proc.pid: proc for proc in [root, *children]},
+            history=History(),
+            extensions=[],
+            refresh_s=3,
+            observability=observability,
+            generated_at=1234.5,
+        )
+
+        self.assertTrue(compact["stream_compact"])
+        self.assertEqual(compact["generated_at"], full["generated_at"])
+        self.assertNotIn("sessions", compact)
+        self.assertEqual(compact["processes"]["items"], [])
+        self.assertEqual(compact["resources"]["programs"], [])
+        self.assertEqual(compact["resources"]["top_disk"], [])
+        self.assertNotIn("members", compact["resources"]["top_cpu"][0])
+        self.assertEqual(len(compact["observability"]["events"]), 4)
+        zone_session = next(
+            zone for zone in compact["zones"] if zone["id"] == "codex"
+        )["sessions"][0]
+        self.assertEqual(zone_session["root"], {"pid": root.pid})
+        self.assertEqual(zone_session["child_count"], 12)
+        self.assertEqual(len(zone_session["children"]), 10)
+        self.assertEqual(len(full["sessions"][0]["children"]), 12)
+        self.assertEqual(len(full["processes"]["items"]), 13)
 
 
 if __name__ == "__main__":

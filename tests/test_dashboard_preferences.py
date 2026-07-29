@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import unittest
 from unittest import mock
@@ -8,6 +9,76 @@ from see_aicoding.web import MonitorState, normalize_dashboard_preferences
 
 
 class DashboardPreferencesTests(unittest.TestCase):
+    def test_compact_snapshot_is_hot_and_full_snapshot_is_built_once_on_demand(self) -> None:
+        state = object.__new__(MonitorState)
+        state._lock = threading.Lock()
+        state._cached_json = ""
+        state._cached_stream_json = ""
+        state._cached_snapshot = None
+        state._cached_full_snapshot = None
+        state._cached_snapshot_inputs = None
+        state._cached_at = 0.0
+        state._observability_cached_at = 0.0
+        state.refresh_s = 3.0
+        state.sampler = mock.Mock()
+        state.sampler.snapshot.return_value = {}
+        state.history = mock.Mock()
+        state.history.net_recv_per_s = 0.0
+        state.history.net_sent_per_s = 0.0
+        state.workload_disk = mock.Mock()
+        state.workload_disk.sample.return_value = {}
+        state.telemetry = mock.Mock()
+        state.telemetry.sample.return_value = {}
+        state.thresholds = mock.Mock()
+        state.thresholds.evaluate.return_value = []
+        state.store = mock.Mock()
+        state.extensions = []
+        state._observability_snapshot = mock.Mock(
+            return_value={
+                "summary": {"active": 0, "critical": 0, "warning": 0},
+                "thresholds": {},
+                "active": [],
+                "events": [],
+            }
+        )
+
+        def fake_snapshot(**kwargs):
+            return {
+                "generated_at": kwargs["generated_at"],
+                "stream_compact": kwargs["compact"],
+                "processes": {"items": []},
+                "resources": {"programs": []},
+            }
+
+        with (
+            mock.patch("see_aicoding.web.build_sessions", return_value=[]),
+            mock.patch(
+                "see_aicoding.web.build_snapshot",
+                side_effect=fake_snapshot,
+            ) as build,
+        ):
+            compact = json.loads(state.snapshot_json(compact=True))
+            self.assertEqual(build.call_count, 1)
+            self.assertTrue(build.call_args.kwargs["compact"])
+            self.assertEqual(
+                compact,
+                json.loads(state.snapshot_json(compact=True)),
+            )
+            self.assertEqual(build.call_count, 1)
+
+            full = json.loads(state.snapshot_json(compact=False))
+            self.assertEqual(build.call_count, 2)
+            self.assertFalse(build.call_args.kwargs["compact"])
+            self.assertEqual(full["generated_at"], compact["generated_at"])
+            self.assertEqual(full, json.loads(state.snapshot_json(compact=False)))
+            self.assertEqual(build.call_count, 2)
+
+            state._cached_at = 0.0
+            state.snapshot_json(compact=True)
+            self.assertEqual(build.call_count, 3)
+            self.assertTrue(build.call_args.kwargs["compact"])
+            self.assertIsNone(state._cached_full_snapshot)
+
     def test_normalizes_unknown_values_and_keeps_identity_column(self) -> None:
         result = normalize_dashboard_preferences(
             {
@@ -257,52 +328,6 @@ class DashboardPreferencesTests(unittest.TestCase):
         self.assertTrue(chatgpt["automatic_available"])
         self.assertTrue(chatgpt["manual_fallback"])
         state.usage.sample.assert_called_once_with(force=True)
-
-    def test_compact_stream_omits_heavy_compatibility_arrays(self) -> None:
-        full = {
-            "schema_version": 3,
-            "sessions": [{"session_id": "one"}],
-            "processes": {"total": 1, "items": [{"pid": 42}]},
-            "resources": {
-                "programs": [{"name": "worker"}],
-                "top_cpu": [{"label": "worker", "primary_pid": 42, "members": [1, 2]}],
-            },
-            "observability": {"events": [{"id": index} for index in range(8)]},
-            "system": {"cpu_percent": 7},
-            "zones": [
-                {
-                    "id": "codex",
-                    "title": "ChatGPT",
-                    "sessions": [
-                        {
-                            "id": "one",
-                            "root": {"pid": 42, "cmdline": "large"},
-                            "children": [
-                                {"pid": index, "label": f"child {index}", "exe": "/large/path"}
-                                for index in range(12)
-                            ],
-                        }
-                    ],
-                }
-            ],
-        }
-
-        compact = MonitorState._compact_snapshot(full)
-
-        self.assertTrue(compact["stream_compact"])
-        self.assertNotIn("sessions", compact)
-        self.assertEqual(compact["processes"]["total"], 1)
-        self.assertEqual(compact["processes"]["items"], [])
-        self.assertEqual(compact["resources"]["programs"], [])
-        self.assertNotIn("members", compact["resources"]["top_cpu"][0])
-        self.assertEqual(len(compact["observability"]["events"]), 4)
-        self.assertEqual(compact["zones"][0]["title"], "ChatGPT")
-        session = compact["zones"][0]["sessions"][0]
-        self.assertEqual(session["root"], {"pid": 42})
-        self.assertEqual(session["child_count"], 12)
-        self.assertEqual(len(session["children"]), 10)
-        self.assertNotIn("exe", session["children"][0])
-
 
 if __name__ == "__main__":
     unittest.main()

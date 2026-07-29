@@ -348,6 +348,8 @@ class MonitorState:
         self._cached_json = ""
         self._cached_stream_json = ""
         self._cached_snapshot: dict | None = None
+        self._cached_full_snapshot: dict | None = None
+        self._cached_snapshot_inputs: dict | None = None
         self._cached_at = 0.0
         self._observability_cache: dict | None = None
         self._observability_cached_at = 0.0
@@ -355,79 +357,6 @@ class MonitorState:
         self.sampler.snapshot()
         self.usage.sample()
         time.sleep(min(0.5, self.refresh_s))
-
-    @staticmethod
-    def _compact_snapshot(snapshot: dict) -> dict:
-        processes = snapshot.get("processes") or {}
-        resources = snapshot.get("resources") or {}
-        observability = snapshot.get("observability") or {}
-
-        def compact_leader(item: dict) -> dict:
-            return {
-                key: item.get(key)
-                for key in (
-                    "label",
-                    "primary_pid",
-                    "process_count",
-                    "cpu_capacity_percent",
-                    "memory_bytes",
-                    "gpu_percent",
-                    "gpu_memory_bytes",
-                )
-                if key in item
-            }
-
-        compact_zones = []
-        for zone in snapshot.get("zones") or []:
-            sessions = []
-            for session in zone.get("sessions") or []:
-                children = session.get("children") or []
-                compact_children = [
-                    {
-                        key: child.get(key)
-                        for key in (
-                            "pid",
-                            "name",
-                            "label",
-                            "cmdline",
-                            "age_seconds",
-                            "age_label",
-                            "cpu_capacity_percent",
-                            "memory_bytes",
-                            "status",
-                        )
-                        if key in child
-                    }
-                    for child in children[:10]
-                ]
-                sessions.append(
-                    {
-                        **session,
-                        "root": {"pid": (session.get("root") or {}).get("pid")},
-                        "child_count": len(children),
-                        "children": compact_children,
-                    }
-                )
-            compact_zones.append({**zone, "sessions": sessions})
-
-        return {
-            **{key: value for key, value in snapshot.items() if key != "sessions"},
-            "stream_compact": True,
-            "processes": {**processes, "items": []},
-            "resources": {
-                **resources,
-                "programs": [],
-                "top_cpu": [compact_leader(item) for item in (resources.get("top_cpu") or [])[:5]],
-                "top_memory": [compact_leader(item) for item in (resources.get("top_memory") or [])[:5]],
-                "top_gpu": [compact_leader(item) for item in (resources.get("top_gpu") or [])[:5]],
-                "top_disk": [],
-            },
-            "observability": {
-                **observability,
-                "events": (observability.get("events") or [])[:4],
-            },
-            "zones": compact_zones,
-        }
 
     def snapshot_json(self, compact: bool = False) -> str:
         with self._lock:
@@ -448,30 +377,45 @@ class MonitorState:
                 self.store.record_sample(system_metrics, timestamp=generated_at)
                 if transitions:
                     self._observability_cached_at = 0.0
+                self._cached_snapshot_inputs = {
+                    "sessions": sessions,
+                    "procs": procs,
+                    "history": self.history,
+                    "extensions": self.extensions,
+                    "refresh_s": self.refresh_s,
+                    "system_metrics": system_metrics,
+                    "observability": self._observability_snapshot(),
+                    "workload_storage": workload_storage,
+                    "generated_at": generated_at,
+                }
+                # SSE is the hot path. Build its compact model directly and only
+                # materialize full process/program arrays when /api/snapshot asks.
                 self._cached_snapshot = build_snapshot(
-                    sessions,
-                    procs,
-                    self.history,
-                    self.extensions,
-                    self.refresh_s,
-                    system_metrics=system_metrics,
-                    observability=self._observability_snapshot(),
-                    workload_storage=workload_storage,
+                    **self._cached_snapshot_inputs,
+                    compact=True,
                 )
+                self._cached_full_snapshot = None
                 self._cached_json = ""
                 self._cached_stream_json = ""
                 self._cached_at = time.monotonic()
             if compact:
                 if not self._cached_stream_json:
                     self._cached_stream_json = json.dumps(
-                        self._compact_snapshot(self._cached_snapshot),
+                        self._cached_snapshot,
                         ensure_ascii=False,
                         separators=(",", ":"),
                     )
                 return self._cached_stream_json
+            if self._cached_full_snapshot is None:
+                if self._cached_snapshot_inputs is None:
+                    raise RuntimeError("Snapshot inputs are unavailable.")
+                self._cached_full_snapshot = build_snapshot(
+                    **self._cached_snapshot_inputs,
+                    compact=False,
+                )
             if not self._cached_json:
                 self._cached_json = json.dumps(
-                    self._cached_snapshot,
+                    self._cached_full_snapshot,
                     ensure_ascii=False,
                     separators=(",", ":"),
                 )
