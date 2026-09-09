@@ -1,6 +1,6 @@
 # 本地资源看板重构说明
 
-更新日期：2026-07-28
+更新日期：2026-09-09
 
 ## 结论
 
@@ -89,6 +89,26 @@ CPU 温度优先使用 `psutil` 暴露的 CPU/package/core 传感器，并取当
 同机开发基准（10 核 macOS、约 687 个可读取进程）中，强制紧凑刷新从每轮 73.46 ms 降至 41.02 ms，减少 44.2%；紧凑事件约 31 KiB，完整快照约 438 KiB。该数字用于验证优化方向，不作为跨硬件 SLA；运行成本仍随进程数量、平台探针和可见区块变化。
 
 ## 模块边界
+
+### 简洁视图与启动器补充
+
+- 完整看板、三种简洁样式和终端视图消费同一套本地资源事实。简洁视图有
+  17 个稳定模块 ID，默认显示 9 个；AI 模块表达剩余额度，不是进程 CPU 用量。
+- `dashboard_view`、`simple_style`、`simple_card_size`、`metric_order` 和
+  `hidden_metric_cards` 经前后端白名单规范化后写入 SQLite。旧版六卡顺序自动
+  补齐新模块；全隐藏输入回退到默认显示组合。`simple_surface` 仅保留兼容，
+  实际浅深纸面由全局主题决定，不再维护第二套外观设置。
+- `/api/snapshot?view=simple` 与 `/events?view=simple` 使用 `simple_snapshot`
+  投影，保留系统指标及网络缩放所需历史，排除进程/会话树。额度、服务和容器仍
+  通过各自缓存端点读取。选择简洁模式不会停止底层共享采样，也不承诺固定内存上限。
+- 全屏聚焦将同一张卡片移动到原生 `dialog`，用占位保留网格位置；退出时恢复位置
+  和原正反面。全屏数字继续使用实时模型，其余卡片暂停装饰动画。键盘焦点由模态
+  边界隔离，未显示的卡片面使用 `inert`。
+- `launcher.py` 校验本地 HTTP 服务身份，以文件锁串行化启动，复用健康服务或
+  创建脱离终端的子进程。`scripts/install-macos-launcher.py` 用 `osacompile`
+  生成绑定当前源码与解释器路径的 Finder 应用；不安装开机服务或更改登录项。
+- 操作流程见[中文使用指南](./USER_GUIDE.zh-CN.md)，样式与动画约束见
+  [Dashboard Design System](./DASHBOARD_DESIGN_SYSTEM.md)。
 
 ```text
 psutil processes ──> monitor.Sampler(system scope) ──> process inventory

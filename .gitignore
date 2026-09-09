@@ -16,3 +16,6 @@ htmlcov/
 .DS_Store
 .idea/
 .vscode/
+
+# Local historical QA captures may contain host names and live usage data.
+artifacts/design-qa/

@@ -1,6 +1,6 @@
 # Dashboard design system
 
-Updated: 2026-07-29
+Updated: 2026-09-08
 
 ## Purpose
 
@@ -9,6 +9,75 @@ Its visual system prioritizes fast scanning, stable spatial memory, readable
 numbers, and explicit unavailable states. The existing dark surfaces and card
 language remain, while color identifies data domains instead of decorating
 arbitrary components.
+
+## Simple mode
+
+User-facing instructions: [English controls](../README.md#simple-mode-quick-start)
+and [中文使用指南](./USER_GUIDE.zh-CN.md). Public screenshots are generated from
+synthetic data by `scripts/capture-docs.cjs`; they must never use real host or
+account information. See [QA notes](../design-qa.md) for coverage and limitations.
+
+The header offers a persisted `Simple / Full` view switch. Simple mode has a
+dedicated 17-card live metric model and shows nine cards by default: the six
+core resources plus Claude, ChatGPT, and Cursor capacity. Disk I/O, network,
+service, and container cards remain available from the card picker. Expensive
+detail sections use their real `hidden` state, so off-screen process, storage,
+runtime, and AI panels do not keep rendering behind the compact surface.
+
+Settings owns the three Claude Design interpretations:
+
+- **Vinyl record** — shellac record, centered value, and a restrained paper
+  label treatment.
+- **Tonearm editorial** — the default simple style, pairing a prominent rotating
+  record and value-driven tonearm with a large editorial reading.
+- **Engraved scale** — individually framed cards with a thin conic resource
+  scale.
+
+All three styles retain the Claude Design record language, with
+responsive card dimensions and the same five theme tokens as the full dashboard.
+The former independent Paper/Colophon control now cycles the global theme;
+Settings remains the single source of theme preferences. Record faces rotate at
+a value-derived speed while live updates are running, and stop when paused or
+when reduced motion is requested.
+Clicking or pressing Enter/Space flips a card to live detail facts. Double-click,
+the expand button, or F opens a native modal dialog containing the same live card;
+double-click, Escape, or the exit button restores its position and original face.
+The background is inert and its record animations pause. Hover adds a restrained
+lift and shadow, disabled with reduced motion. Dragging a
+card, or pressing Alt+Left/Right while it has keyboard focus, persists the card
+order. Card visibility and style remain centralized in Settings and are also
+available from the header's Modules multi-select dropdown, with All/System/AI/default
+presets and automatic saving. Names, detail captions, and controls follow the
+global Chinese/English preference; product identities remain unchanged.
+The header's S/M/L (小/中/大 in Chinese) control changes the
+persisted card scale for all three styles. The responsive contract is one
+column on phones and balanced rows from tablet widths upward. For nine cards on
+an ultrawide display, medium size uses a 3 by 3 grid and fills available height;
+top-bar controls retain at least a 44-pixel mobile touch target.
+
+All three simple styles use a theme-aware 2 px card border, 8 px corners,
+subtle shadow, and consistent gaps. Border contrast is stronger than interior
+rules so every card remains distinct in light and dark themes.
+
+Card text uses the system sans-serif stack for crisp Chinese and English labels.
+Titles and descriptions start at 14 px and follow the global text-size setting;
+primary readings use heavier, responsive tabular numerals. Narrow tonearm cards
+stack the enlarged record above their reading. The tonearm is inside the record
+and below the stationary center label, so it cannot obscure the text.
+
+Vinyl and tonearm records have an asymmetric highlight, arc, and bright marker
+rotating once every 4.5–8 seconds. Engraved progress remains fixed to its value,
+while a separate asymmetric arc and marker orbit the inner rim every five seconds.
+Its fixed-width progress ring never grows thick enough to cover that orbit.
+Numeric labels never rotate and use a shared horizontal center and vertical anchor,
+independent of digit count, units, or description length.
+Every moving layer pauses offscreen, on a flipped card, in a background tab,
+or when the dashboard is paused; reduced-motion settings are respected.
+
+Card front footers participate in normal grid flow instead of absolute
+positioning. Long descriptions wrap or expose their complete value on hover or
+the scrollable back face. The lightweight simple stream omits process/session
+trees, and hidden full-view DOM is released when entering simple mode.
 
 ## Color contract
 

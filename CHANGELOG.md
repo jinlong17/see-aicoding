@@ -1,6 +1,60 @@
 # Changelog
 
-## Unreleased — 2026-07-29
+## Unreleased — updated 2026-09-09
+
+### Three simple dashboards and live card focus
+
+- Added Vinyl Record, Tonearm Editorial, and Engraved Scale views alongside the
+  full dashboard. All three share the global Chinese/English preference and five
+  themes, with translated controls, names, and supported status messages.
+- Added a dedicated 17-module model with nine default system/AI cards. The
+  Modules dropdown supports individual selections, All/System/AI/default
+  presets, automatic persistence, and a minimum-one-visible guard. Legacy
+  six-card preferences are normalized without losing their ordering.
+- Added persisted S/M/L sizing, balanced responsive rows, more visible card
+  boundaries, readable text, and full names in tonearm record centers. Small
+  layouts now use available viewport height and avoid sparse, overly wide rows
+  when only a few modules are selected.
+- Improved vinyl/tonearm highlights and rotating markers. Engraved Scale uses
+  a fixed-width resource ring plus a separate five-second rotating arc; numeric
+  readings have stable center anchors and do not rotate or overlap the tonearm.
+- Added hover emphasis, single-click/Enter/Space detail flips, and double-click,
+  F, or expand-button full-window focus. Double-click, F, Esc, or the exit button
+  restores the original card position and face. The same card continues receiving
+  live data; native dialog focus isolation and inert hidden faces keep keyboard
+  navigation scoped correctly.
+
+### Simple-mode resource usage and desktop startup
+
+- Added `/api/snapshot?view=simple` and `/events?view=simple` projections that
+  omit process/session trees while preserving system metrics and network scales.
+  Full-view arrays and heavy DOM are released on entering simple mode, and
+  unchanged cards avoid redundant rendering.
+- Pause record motion offscreen, on flipped cards, in background tabs, while
+  another card is expanded, or when reduced motion is requested. Animations use
+  CSS transforms, without adding a per-frame JavaScript render loop.
+- Added a macOS Finder/Dock launcher installer. The generated app validates and
+  reuses a healthy local server or starts a detached one, waits for readiness,
+  serializes concurrent launches, and rotates startup logs. It does not
+  create a login item or install a background service.
+- Delay terminal-only imports on the Web startup path.
+
+### Documentation and validation
+
+- Updated the repository homepage, package/page descriptions, installation
+  instructions, architecture, and design-system documentation. Added a Chinese
+  user guide with all modules, shortcut mappings, persistence behavior, quota
+  semantics, performance options, and launcher troubleshooting.
+- Added public-safe demo screenshots generated from synthetic fixtures; local
+  historical QA screenshots remain excluded from Git.
+- Added regression coverage for simple preferences, snapshot projection, palette
+  contracts, and launcher behavior. The current Python suite contains 74 tests.
+- Browser QA covered 54 style/language/size/viewport combinations and 15
+  style/theme combinations, plus module filtering, full-window live updates,
+  bidirectional language switching, and full/simple round trips. This is Chrome
+  coverage, not a claim of real-device Safari validation.
+
+### Earlier unreleased changes (July 2026)
 
 ### Language, appearance, and AI workload context
 
