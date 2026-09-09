@@ -51,6 +51,44 @@ _DASHBOARD_ORDER_IDS = {
     "storage",
     "runtime",
 }
+_METRIC_CARD_ORDER = (
+    "cpu",
+    "memory",
+    "gpu",
+    "storage",
+    "network",
+    "processes",
+    "read",
+    "write",
+    "iops",
+    "latency",
+    "down",
+    "up",
+    "services",
+    "containers",
+    "claude",
+    "chatgpt",
+    "cursor",
+)
+_METRIC_CARD_IDS = set(_METRIC_CARD_ORDER)
+_LEGACY_METRIC_CARD_IDS = {
+    "cpu",
+    "gpu",
+    "memory",
+    "storage",
+    "network",
+    "processes",
+}
+_DEFAULT_HIDDEN_METRIC_CARDS = [
+    "read",
+    "write",
+    "iops",
+    "latency",
+    "down",
+    "up",
+    "services",
+    "containers",
+]
 _PROCESS_COLUMN_IDS = {
     "identity",
     "pid",
@@ -69,8 +107,13 @@ DEFAULT_DASHBOARD_PREFERENCES = {
     "font_size": "medium",
     "language": "en",
     "theme": "deep",
+    "dashboard_view": "full",
+    "simple_style": "tonearm",
+    "simple_card_size": "medium",
+    "simple_surface": "paper",
     "performance_mode": "balanced",
     "hidden_sections": [],
+    "hidden_metric_cards": list(_DEFAULT_HIDDEN_METRIC_CARDS),
     "show_idle_ai": False,
     "show_quota_cards": True,
     "section_order": [
@@ -81,6 +124,7 @@ DEFAULT_DASHBOARD_PREFERENCES = {
         "storage",
         "runtime",
     ],
+    "metric_order": list(_METRIC_CARD_ORDER),
     "process_columns": [
         "identity",
         "pid",
@@ -122,10 +166,16 @@ def normalize_dashboard_preferences(value: object) -> dict:
     font_size = source.get("font_size")
     language = source.get("language")
     theme = source.get("theme")
+    dashboard_view = source.get("dashboard_view")
+    simple_style = source.get("simple_style")
+    simple_card_size = source.get("simple_card_size")
+    simple_surface = source.get("simple_surface")
     performance_mode = source.get("performance_mode")
     hidden = source.get("hidden_sections")
+    hidden_metric_cards = source.get("hidden_metric_cards")
     columns = source.get("process_columns")
     order = source.get("section_order")
+    metric_order = source.get("metric_order")
     if density not in {"compact", "comfortable"}:
         density = DEFAULT_DASHBOARD_PREFERENCES["density"]
     if font_size not in {"small", "medium", "large"}:
@@ -134,14 +184,28 @@ def normalize_dashboard_preferences(value: object) -> dict:
         language = DEFAULT_DASHBOARD_PREFERENCES["language"]
     if theme not in {"light", "warm", "mint", "dark", "deep"}:
         theme = DEFAULT_DASHBOARD_PREFERENCES["theme"]
+    if dashboard_view not in {"full", "simple"}:
+        dashboard_view = DEFAULT_DASHBOARD_PREFERENCES["dashboard_view"]
+    if simple_style not in {"vinyl", "tonearm", "engraved"}:
+        simple_style = DEFAULT_DASHBOARD_PREFERENCES["simple_style"]
+    if simple_card_size not in {"small", "medium", "large"}:
+        simple_card_size = DEFAULT_DASHBOARD_PREFERENCES["simple_card_size"]
+    if simple_surface not in {"paper", "colophon"}:
+        simple_surface = DEFAULT_DASHBOARD_PREFERENCES["simple_surface"]
     if performance_mode not in {"realtime", "balanced", "efficient"}:
         performance_mode = DEFAULT_DASHBOARD_PREFERENCES["performance_mode"]
     if not isinstance(hidden, list):
         hidden = []
+    if not isinstance(hidden_metric_cards, list):
+        hidden_metric_cards = list(
+            DEFAULT_DASHBOARD_PREFERENCES["hidden_metric_cards"]
+        )
     if not isinstance(columns, list):
         columns = list(DEFAULT_DASHBOARD_PREFERENCES["process_columns"])
     if not isinstance(order, list):
         order = list(DEFAULT_DASHBOARD_PREFERENCES["section_order"])
+    if not isinstance(metric_order, list):
+        metric_order = list(DEFAULT_DASHBOARD_PREFERENCES["metric_order"])
     safe_order = []
     for item in order:
         if isinstance(item, str) and item in _DASHBOARD_ORDER_IDS and item not in safe_order:
@@ -150,6 +214,39 @@ def normalize_dashboard_preferences(value: object) -> dict:
         item for item in DEFAULT_DASHBOARD_PREFERENCES["section_order"]
         if item not in safe_order
     )
+    safe_metric_order = []
+    for item in metric_order:
+        if (
+            isinstance(item, str)
+            and item in _METRIC_CARD_IDS
+            and item not in safe_metric_order
+        ):
+            safe_metric_order.append(item)
+    safe_metric_order.extend(
+        item for item in DEFAULT_DASHBOARD_PREFERENCES["metric_order"]
+        if item not in safe_metric_order
+    )
+    supplied_metric_ids = {
+        item for item in metric_order
+        if isinstance(item, str) and item in _METRIC_CARD_IDS
+    }
+    legacy_simple_preferences = (
+        "simple_card_size" not in source
+        and bool(supplied_metric_ids)
+        and supplied_metric_ids.issubset(_LEGACY_METRIC_CARD_IDS)
+    )
+    if legacy_simple_preferences and not hidden_metric_cards:
+        hidden_metric_cards = list(_DEFAULT_HIDDEN_METRIC_CARDS)
+    hidden_metric_card_ids = {
+        item for item in hidden_metric_cards
+        if isinstance(item, str) and item in _METRIC_CARD_IDS
+    }
+    safe_hidden_metric_cards = [
+        item for item in _METRIC_CARD_ORDER
+        if item in hidden_metric_card_ids
+    ]
+    if len(safe_hidden_metric_cards) == len(_METRIC_CARD_IDS):
+        safe_hidden_metric_cards = list(_DEFAULT_HIDDEN_METRIC_CARDS)
     safe_columns = [
         item for item in columns
         if isinstance(item, str) and item in _PROCESS_COLUMN_IDS
@@ -180,14 +277,20 @@ def normalize_dashboard_preferences(value: object) -> dict:
         "font_size": font_size,
         "language": language,
         "theme": theme,
+        "dashboard_view": dashboard_view,
+        "simple_style": simple_style,
+        "simple_card_size": simple_card_size,
+        "simple_surface": simple_surface,
         "performance_mode": performance_mode,
         "hidden_sections": sorted({
             item for item in hidden
             if isinstance(item, str) and item in _DASHBOARD_SECTION_IDS
         }),
+        "hidden_metric_cards": safe_hidden_metric_cards,
         "show_idle_ai": bool(source.get("show_idle_ai", False)),
         "show_quota_cards": bool(source.get("show_quota_cards", True)),
         "section_order": safe_order,
+        "metric_order": safe_metric_order,
         "process_columns": safe_columns,
         "provider_quotas": provider_quotas,
         "quota_updated_at": quota_updated_at,
@@ -363,7 +466,7 @@ class MonitorState:
         self.usage.sample()
         time.sleep(min(0.5, self.refresh_s))
 
-    def snapshot_json(self, compact: bool = False) -> str:
+    def snapshot_json(self, compact: bool = False, simple: bool = False) -> str:
         with self._lock:
             now = time.monotonic()
             if self._cached_snapshot is None or now - self._cached_at >= self.refresh_s * 0.8:
@@ -403,6 +506,8 @@ class MonitorState:
                 self._cached_json = ""
                 self._cached_stream_json = ""
                 self._cached_at = time.monotonic()
+            if simple:
+                return json.dumps(simple_snapshot(self._cached_snapshot), ensure_ascii=False, separators=(",", ":"))
             if compact:
                 if not self._cached_stream_json:
                     self._cached_stream_json = json.dumps(
@@ -524,6 +629,27 @@ class MonitorState:
             return self.containers.sample(force=force)
 
 
+def simple_snapshot(snapshot: dict) -> dict:
+    """Only the live metrics used by the simple cards; no process/session trees."""
+    system = snapshot.get("system", {})
+    fields = ("user", "hostname", "platform", "logical_cpus", "physical_cpus",
+              "cpu", "memory", "swap", "gpu", "disks", "disk_io", "network",
+              "process_summary", "storage_health")
+    history = system.get("history", {})
+    return {
+        "schema_version": snapshot.get("schema_version", 3),
+        "generated_at": snapshot.get("generated_at"),
+        "refresh_interval": snapshot.get("refresh_interval"),
+        "stream_compact": True,
+        "simple_view": True,
+        "system": {
+            **{key: system[key] for key in fields if key in system},
+            "history": {key: history.get(key, []) for key in (
+                "network_download_bytes_per_s", "network_upload_bytes_per_s")},
+        },
+    }
+
+
 class WebMonitorServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
@@ -559,7 +685,7 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if parsed.path == "/api/snapshot":
-            self._serve_snapshot()
+            self._serve_snapshot(simple=parse_qs(parsed.query).get("view") == ["simple"])
             return
         if parsed.path == "/api/thresholds":
             self._serve_json(self.monitor_server.state.threshold_snapshot())
@@ -617,6 +743,7 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             self._serve_events(
                 once=query.get("once") == ["1"],
                 interval_s=interval_s,
+                simple=query.get("view") == ["simple"],
             )
             return
         if parsed.path.startswith("/static/"):
@@ -710,9 +837,9 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             return
         self._serve_json(result)
 
-    def _serve_snapshot(self) -> None:
+    def _serve_snapshot(self, simple: bool = False) -> None:
         try:
-            body = self.monitor_server.state.snapshot_json().encode("utf-8")
+            body = self.monitor_server.state.snapshot_json(simple=simple).encode("utf-8")
         except Exception as exc:  # pragma: no cover - defensive for local monitor.
             self._serve_json_error(exc)
             return
@@ -790,7 +917,7 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
             return
         self._serve_json(result)
 
-    def _serve_events(self, once: bool = False, interval_s: float = 3.0) -> None:
+    def _serve_events(self, once: bool = False, interval_s: float = 3.0, simple: bool = False) -> None:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
@@ -799,7 +926,7 @@ class WebMonitorHandler(BaseHTTPRequestHandler):
         self.end_headers()
         while True:
             try:
-                payload = self.monitor_server.state.snapshot_json(compact=True)
+                payload = self.monitor_server.state.snapshot_json(compact=True, simple=simple)
                 self.wfile.write(b"event: snapshot\n")
                 self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                 self.wfile.flush()

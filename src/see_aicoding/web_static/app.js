@@ -1,6 +1,39 @@
 "use strict";
 
 const SECTION_ORDER_DEFAULT = ["coding", "overview", "leaders", "processes", "storage", "runtime"];
+const METRIC_ORDER_DEFAULT = [
+  "cpu", "memory", "gpu", "storage", "network", "processes",
+  "read", "write", "iops", "latency", "down", "up",
+  "services", "containers", "claude", "chatgpt", "cursor",
+];
+const LEGACY_METRIC_IDS = new Set(["cpu", "gpu", "memory", "storage", "network", "processes"]);
+const DEFAULT_HIDDEN_METRIC_CARDS = ["read", "write", "iops", "latency", "down", "up", "services", "containers"];
+const SIMPLE_METRIC_DEFINITIONS = [
+  { id: "cpu", label: "CPU", short: "CPU", zh: "处理器", hue: 232 },
+  { id: "memory", label: "Memory", short: "MEM", zh: "内存", hue: 62 },
+  { id: "gpu", label: "GPU", short: "GPU", zh: "图形处理", hue: 305 },
+  { id: "storage", label: "Storage", short: "DISK", zh: "存储容量", hue: 32 },
+  { id: "network", label: "Network", short: "NET", zh: "网络吞吐", hue: 168 },
+  { id: "processes", label: "Processes", short: "PROC", zh: "进程数", hue: 350 },
+  { id: "read", label: "Disk read", short: "R", zh: "磁盘读取", hue: 200 },
+  { id: "write", label: "Disk write", short: "W", zh: "磁盘写入", hue: 46 },
+  { id: "iops", label: "IOPS", short: "IO", zh: "每秒读写", hue: 132 },
+  { id: "latency", label: "Latency", short: "LAT", zh: "I/O 延迟", hue: 18 },
+  { id: "down", label: "Download", short: "DL", zh: "下行速率", hue: 152 },
+  { id: "up", label: "Upload", short: "UL", zh: "上行速率", hue: 288 },
+  { id: "services", label: "Services", short: "SVC", zh: "系统服务", hue: 108 },
+  { id: "containers", label: "Containers", short: "CTR", zh: "容器", hue: 262 },
+  { id: "claude", label: "Claude", short: "CL", zh: "Claude 余量", hue: 40 },
+  { id: "chatgpt", label: "ChatGPT", short: "CO", zh: "ChatGPT 余量", hue: 176 },
+  { id: "cursor", label: "Cursor", short: "CU", zh: "Cursor 余量", hue: 250 },
+];
+const SIMPLE_METRIC_BY_ID = new Map(SIMPLE_METRIC_DEFINITIONS.map((metric) => [metric.id, metric]));
+const SIMPLE_STYLE_LABELS = { vinyl: ["Vinyl record", "虫胶唱片"], tonearm: ["Tonearm editorial", "唱臂与刊头"], engraved: ["Engraved scale", "铜版刻度"] };
+function simpleMetricLabel(metric, description = false) {
+  const ai = ["claude", "chatgpt", "cursor"].includes(metric.id);
+  if (ai && !description) return metric.label;
+  return localized(ai ? `${metric.label} remaining` : metric.label, metric.zh);
+}
 const SECTION_LABELS = {
   coding: "AI workloads",
   overview: "Activity and alerts",
@@ -34,6 +67,17 @@ const ZH_TEXT = {
   "Standard": "标准",
   "Large": "大",
   "Refresh": "刷新频率",
+  "Dashboard view": "看板视图",
+  "Simple": "简洁",
+  "Full": "完整",
+  "Simple style": "简洁样式",
+  "Vinyl record": "虫胶唱片",
+  "Tonearm editorial": "唱臂与刊头",
+  "Engraved scale": "铜版刻度",
+  "Simple card size": "简洁卡片尺寸",
+  "Simple surface": "简洁模式纸面",
+  "Paper": "Paper",
+  "Colophon": "Colophon",
   "Light": "浅色",
   "Warm yellow": "浅黄色",
   "Soft green": "浅绿色",
@@ -46,6 +90,39 @@ const ZH_TEXT = {
   "Compact": "紧凑",
   "Comfortable": "舒适",
   "Visible sections": "可见区块",
+  "Simple mode cards": "简洁模式卡片",
+  "Choose visible cards here. Drag cards on the simple dashboard to reorder them.": "在这里选择显示的卡片；可在简洁看板上拖拽调整顺序。",
+  "Choose simple mode cards": "选择简洁模式卡片",
+  "Visible modules": "显示模块",
+  "Select modules to display. Changes are saved automatically.": "勾选需要显示的模块，修改会自动保存。",
+  "All modules": "全部模块",
+  "System only": "仅系统",
+  "AI only": "仅 AI",
+  "Default modules": "默认模块",
+  "Expand card": "全屏显示卡片",
+  "Exit fullscreen": "退出全屏",
+  "Double-click the card or press Esc to exit": "双击卡片或按 Esc 退出",
+  "Small cards": "小卡片",
+  "Medium cards": "中卡片",
+  "Large cards": "大卡片",
+  "Simple system overview": "简洁系统概览",
+  "Docker and Podman CLIs were not detected. Install either runtime to populate the container inventory automatically.": "未检测到 Docker 或 Podman 命令行工具；安装其中一种运行环境后即可自动显示容器。",
+  "System service inventory is available on macOS launchd and Linux systemd.": "系统服务清单支持 macOS launchd 和 Linux systemd。",
+  "systemctl was not found": "未找到 systemctl 命令",
+  "launchctl failed": "launchctl 执行失败",
+  "systemctl failed": "systemctl 执行失败",
+  "Docker daemon is unavailable": "Docker 后台服务不可用",
+  "Podman service is unavailable": "Podman 服务不可用",
+  "Cards": "卡片",
+  "Details": "详情",
+  "Open full dashboard": "打开完整看板",
+  "Open full dashboard →": "打开完整看板 →",
+  "Press to return": "按下返回",
+  "Claude remaining": "Claude 余量",
+  "ChatGPT remaining": "ChatGPT 余量",
+  "Cursor remaining": "Cursor 余量",
+  "I/O latency": "I/O 延迟",
+  "System services": "系统服务",
   "Top resource users": "资源占用排行",
   "Activity and alerts": "活动与告警",
   "Programs and processes": "程序与进程",
@@ -255,11 +332,17 @@ const state = {
     font_size: "medium",
     language: "en",
     theme: "deep",
+    dashboard_view: "full",
+    simple_style: "tonearm",
+    simple_card_size: "medium",
+    simple_surface: "paper",
     performance_mode: "balanced",
     hidden_sections: [],
+    hidden_metric_cards: [...DEFAULT_HIDDEN_METRIC_CARDS],
     show_idle_ai: false,
     show_quota_cards: true,
     section_order: [...SECTION_ORDER_DEFAULT],
+    metric_order: [...METRIC_ORDER_DEFAULT],
     process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
     provider_quotas: {
       claude: { five_hour_used_percent: null, weekly_used_percent: null },
@@ -272,6 +355,10 @@ const state = {
   settingsDirty: false,
   preferenceSaveInFlight: false,
   searchTimer: null,
+  draggedMetricId: null,
+  suppressMetricClick: false,
+  simpleCardSignature: "",
+  simpleFlipped: new Set(),
 };
 
 const el = Object.fromEntries(
@@ -299,8 +386,9 @@ const el = Object.fromEntries(
     "containerProvider", "containerSummary", "containerNote", "refreshContainers",
     "containerGrid", "containerPanel", "thirdLeaderCard", "thirdLeaderGlyph",
     "thirdLeaderTitle", "thirdLeaderNote", "showIdleAiToggle", "customizeMenu",
-    "resetPreferences", "savePreferences", "sectionOrderList", "languageSelect", "themeSelect", "fontSizeSelect", "performanceMode", "quotaGrid", "refreshQuotas",
+    "resetPreferences", "savePreferences", "sectionOrderList", "languageSelect", "themeSelect", "fontSizeSelect", "performanceMode", "dashboardViewSelect", "simpleStyleSelect", "simpleCardSizeSelect", "quotaGrid", "refreshQuotas",
     "showQuotaCardsSetting", "toggleQuotaVisibility",
+    "simpleCardPickerBtn", "simpleCardPickerPanel", "simpleMetricGrid", "simpleSurfaceToggle", "simpleSizeSwitcher",
     "drawerScrim", "detailsTitle", "detailsBody", "closeDetails", "toast",
   ].map((id) => [id, document.getElementById(id)])
 );
@@ -361,7 +449,7 @@ function localizeDom(root = document.body) {
   while (walker.nextNode()) nodes.push(walker.currentNode);
   nodes.forEach((node) => {
     const parent = node.parentElement;
-    if (!parent || ["SCRIPT", "STYLE"].includes(parent.tagName)) return;
+    if (!parent || ["SCRIPT", "STYLE"].includes(parent.tagName) || parent.closest("[data-no-localize]")) return;
     const previous = originalText.get(node);
     const source = previous && node.nodeValue === previous.rendered
       ? previous.source
@@ -372,6 +460,7 @@ function localizeDom(root = document.body) {
   });
   const elements = root.nodeType === Node.ELEMENT_NODE ? [root, ...root.querySelectorAll("*")] : [...root.querySelectorAll("*")];
   elements.forEach((node) => {
+    if (node.closest?.("[data-no-localize]")) return;
     const saved = originalAttributes.get(node) || {};
     ["aria-label", "placeholder", "title"].forEach((attribute) => {
       if (!node.hasAttribute(attribute)) return;
@@ -506,6 +595,7 @@ function setMeter(node, value) {
 function setGauge(node, value, label = null) {
   const percent = clamp(value);
   node.style.setProperty("--gauge-value", `${percent}%`);
+  node.style.setProperty("--tonearm-angle", `${-8 + percent * 0.28}deg`);
   const text = node.querySelector("span");
   if (text) text.textContent = label ?? `${Math.round(percent)}%`;
 }
@@ -547,6 +637,7 @@ function renderChart(series, options = {}) {
 
 function setConnection(label, mode = "live") {
   el.connectionState.querySelector("span:last-child").textContent = label;
+  localizeDom(el.connectionState);
   el.connectionState.classList.toggle("is-waiting", mode === "waiting");
   el.connectionState.classList.toggle("is-error", mode === "error");
   el.connectionState.classList.toggle("is-paused", mode === "paused");
@@ -624,7 +715,10 @@ function renderOverview(snapshot) {
   const gpuValue = gpuAvailable ? Number(gpu.utilization_percent || 0) : 0;
   const diskValue = Number(systemDisk.percent || 0);
 
-  el.hostLine.textContent = `${system.user || "user"}@${system.hostname || "localhost"} · ${system.platform || "Local system"}`;
+  const simpleStyleLabel = localized(...SIMPLE_STYLE_LABELS[state.preferences.simple_style]);
+  el.hostLine.textContent = state.preferences.dashboard_view === "simple"
+    ? `${system.user || "user"}@${system.hostname || "localhost"} · ${simpleStyleLabel}`
+    : `${system.user || "user"}@${system.hostname || "localhost"} · ${system.platform || "Local system"}`;
   el.factUptime.textContent = formatDuration(system.uptime_seconds || 0);
   el.factProcesses.textContent = formatNumber(processSummary.total || snapshot.processes?.items?.length || 0);
   el.factLoad.textContent = Number(cpu.load_1 || 0).toFixed(2);
@@ -712,6 +806,7 @@ function renderOverview(snapshot) {
   el.topCpu.innerHTML = renderLeaders(resources.top_cpu || [], "cpu");
   el.topMemory.innerHTML = renderLeaders(resources.top_memory || [], "memory");
   renderThirdLeader(resources, gpu);
+  updateSimpleMetricCards(snapshot);
   if (state.preferences.language === "zh-CN") {
     localizeDom(document.querySelector(".metric-grid"));
     localizeDom(document.querySelector("[data-dashboard-order='leaders']"));
@@ -1133,6 +1228,7 @@ function renderServices(model) {
     </tr>`;
   }).join("") : `<tr><td colspan="5"><div class="empty-state">${model?.available ? "No system services match the search" : escapeHtml(model?.note || "Service inventory unavailable")}</div></td></tr>`;
   el.serviceVisibleCount.textContent = `Showing ${formatNumber(items.length)} of ${formatNumber(source.length)}`;
+  updateSimpleMetricCards();
 }
 
 function renderRuntimeSummary() {
@@ -1172,6 +1268,7 @@ function renderContainers(model) {
       <div class="container-foot"><span>${escapeHtml(item.status || "--")}</span><span title="${escapeHtml(item.ports || "")}">${escapeHtml(item.ports || "No published ports")}</span></div>
     </article>`).join("") : `<div class="empty-state container-empty">${escapeHtml(model?.note || "No containers")}</div>`;
   renderRuntimeSummary();
+  updateSimpleMetricCards();
 }
 
 function renderNetworkAttribution(model) {
@@ -1447,11 +1544,17 @@ function normalizePreferences(value = {}) {
     font_size: "medium",
     language: "en",
     theme: "deep",
+    dashboard_view: "full",
+    simple_style: "tonearm",
+    simple_card_size: "medium",
+    simple_surface: "paper",
     performance_mode: "balanced",
     hidden_sections: [],
+    hidden_metric_cards: DEFAULT_HIDDEN_METRIC_CARDS,
     show_idle_ai: false,
     show_quota_cards: true,
     section_order: SECTION_ORDER_DEFAULT,
+    metric_order: METRIC_ORDER_DEFAULT,
     process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
     provider_quotas: {
       claude: { five_hour_used_percent: null, weekly_used_percent: null },
@@ -1461,12 +1564,27 @@ function normalizePreferences(value = {}) {
   };
   const density = value.density === "comfortable" ? "comfortable" : "compact";
   const hidden = Array.isArray(value.hidden_sections) ? value.hidden_sections.filter((item) => ["leaders", "processes", "storage", "runtime", "coding"].includes(item)) : [];
+  let hiddenMetricCards = Array.isArray(value.hidden_metric_cards)
+    ? value.hidden_metric_cards.filter((item) => METRIC_ORDER_DEFAULT.includes(item))
+    : [...defaults.hidden_metric_cards];
+  hiddenMetricCards = [...new Set(hiddenMetricCards)];
+  if (hiddenMetricCards.length === METRIC_ORDER_DEFAULT.length) hiddenMetricCards = [...defaults.hidden_metric_cards];
   const columns = Array.isArray(value.process_columns) ? value.process_columns.filter((item) => defaults.process_columns.includes(item)) : defaults.process_columns;
   const requestedOrder = Array.isArray(value.section_order) ? value.section_order : defaults.section_order;
   const sectionOrder = [...new Set(requestedOrder.filter((item) => SECTION_ORDER_DEFAULT.includes(item)))];
   SECTION_ORDER_DEFAULT.forEach((item) => {
     if (!sectionOrder.includes(item)) sectionOrder.push(item);
   });
+  const requestedMetricOrder = Array.isArray(value.metric_order) ? value.metric_order : defaults.metric_order;
+  const metricOrder = [...new Set(requestedMetricOrder.filter((item) => METRIC_ORDER_DEFAULT.includes(item)))];
+  METRIC_ORDER_DEFAULT.forEach((item) => {
+    if (!metricOrder.includes(item)) metricOrder.push(item);
+  });
+  const suppliedMetricIds = new Set(requestedMetricOrder.filter((item) => METRIC_ORDER_DEFAULT.includes(item)));
+  const legacySimplePreferences = !Object.hasOwn(value, "simple_card_size")
+    && suppliedMetricIds.size > 0
+    && [...suppliedMetricIds].every((item) => LEGACY_METRIC_IDS.has(item));
+  if (legacySimplePreferences && hiddenMetricCards.length === 0) hiddenMetricCards = [...defaults.hidden_metric_cards];
   const percent = (raw) => {
     if (raw === null || raw === undefined || raw === "") return null;
     const number = Number(raw);
@@ -1485,11 +1603,17 @@ function normalizePreferences(value = {}) {
     font_size: ["small", "medium", "large"].includes(value.font_size) ? value.font_size : defaults.font_size,
     language: ["en", "zh-CN"].includes(value.language) ? value.language : defaults.language,
     theme: ["light", "warm", "mint", "dark", "deep"].includes(value.theme) ? value.theme : defaults.theme,
+    dashboard_view: ["full", "simple"].includes(value.dashboard_view) ? value.dashboard_view : defaults.dashboard_view,
+    simple_style: ["vinyl", "tonearm", "engraved"].includes(value.simple_style) ? value.simple_style : defaults.simple_style,
+    simple_card_size: ["small", "medium", "large"].includes(value.simple_card_size) ? value.simple_card_size : defaults.simple_card_size,
+    simple_surface: ["paper", "colophon"].includes(value.simple_surface) ? value.simple_surface : defaults.simple_surface,
     performance_mode: Object.hasOwn(PERFORMANCE_INTERVALS, value.performance_mode) ? value.performance_mode : defaults.performance_mode,
     hidden_sections: [...new Set(hidden)],
+    hidden_metric_cards: hiddenMetricCards,
     show_idle_ai: Boolean(value.show_idle_ai),
     show_quota_cards: value.show_quota_cards === undefined ? defaults.show_quota_cards : Boolean(value.show_quota_cards),
     section_order: sectionOrder,
+    metric_order: metricOrder,
     process_columns: ["identity", ...columns.filter((item) => item !== "identity")],
     provider_quotas: providerQuotas,
     quota_updated_at: Number(value.quota_updated_at) || null,
@@ -1518,7 +1642,499 @@ function applySectionOrder() {
   });
 }
 
+function simpleRateParts(bytesPerSecond) {
+  const value = Math.max(0, Number(bytesPerSecond || 0));
+  const scales = [[1024 ** 3, "G/s"], [1024 ** 2, "M/s"], [1024, "K/s"]];
+  const scale = scales.find(([threshold]) => value >= threshold);
+  if (!scale) return { value: String(Math.round(value)), unit: "B/s" };
+  const number = value / scale[0];
+  return { value: number >= 100 ? String(Math.round(number)) : number.toFixed(1), unit: scale[1] };
+}
+
+function simpleQuotaModel(id) {
+  const provider = state.providerUsage?.providers?.find((item) => item.id === id);
+  const windows = provider?.windows || [];
+  const fiveHour = windows.find((item) => item.id === "five_hour");
+  const weekly = windows.find((item) => item.id === "weekly");
+  const remaining = (windowModel) => {
+    if (!windowModel) return null;
+    if (windowModel.remaining_percent !== null && windowModel.remaining_percent !== undefined) return Number(windowModel.remaining_percent);
+    if (windowModel.used_percent !== null && windowModel.used_percent !== undefined) return 100 - Number(windowModel.used_percent);
+    return null;
+  };
+  const fiveRemaining = remaining(fiveHour);
+  const weeklyRemaining = remaining(weekly);
+  const primary = Number.isFinite(fiveRemaining) ? fiveRemaining : weeklyRemaining;
+  const available = Number.isFinite(primary);
+  const status = provider ? quotaProviderStatus(provider) : localized("Unavailable", "不可用");
+  const reset = (fiveHour || weekly)?.resets_at;
+  const windowName = Number.isFinite(fiveRemaining) ? localized("5 hours", "5 小时") : localized("Weekly", "每周");
+  return {
+    value: available ? String(Math.round(primary)) : "--",
+    unit: available ? "%" : "",
+    pct: available ? clamp(primary) : 0,
+    detail: available
+      ? `${status} · ${windowName}${reset ? ` · ${formatEventTime(reset)}` : ""}`
+      : id === "cursor"
+        ? localized("No local source · Unavailable", "无本地来源 · 不可用")
+        : provider?.reason || localized("Quota data unavailable", "额度数据不可用"),
+    facts: [
+      [localized("5 hours", "5 小时"), Number.isFinite(fiveRemaining) ? `${Math.round(fiveRemaining)}%` : "--"],
+      [localized("Weekly", "每周"), Number.isFinite(weeklyRemaining) ? `${Math.round(weeklyRemaining)}%` : "--"],
+      [localized("Source", "来源"), provider ? quotaSourceLabel(provider.source?.kind) : "--"],
+    ],
+  };
+}
+
+function simpleMetricModel(id, snapshot = state.snapshot) {
+  const system = snapshot?.system || {};
+  const cpu = system.cpu || {};
+  const gpu = system.gpu || {};
+  const memory = system.memory || {};
+  const swap = system.swap || {};
+  const disks = system.disks || [];
+  const disk = disks.find((item) => item.is_system) || disks[0] || {};
+  const diskIo = system.disk_io || {};
+  const network = system.network || {};
+  const processSummary = system.process_summary || {};
+  const health = system.storage_health || {};
+  const healthDevice = health.devices?.[0] || {};
+  const download = Number(network.download_bytes_per_s || 0);
+  const upload = Number(network.upload_bytes_per_s || 0);
+  const combined = download + upload;
+  const history = system.history || {};
+  const networkPeak = Math.max(combined, ...(history.network_download_bytes_per_s || []).map((value, index) => Number(value || 0) + Number((history.network_upload_bytes_per_s || [])[index] || 0)), 1);
+  const read = simpleRateParts(diskIo.read_bytes_per_s);
+  const write = simpleRateParts(diskIo.write_bytes_per_s);
+  const down = simpleRateParts(download);
+  const up = simpleRateParts(upload);
+  const totalIops = Number(diskIo.read_iops || 0) + Number(diskIo.write_iops || 0);
+  const latency = [diskIo.read_latency_ms, diskIo.write_latency_ms].map(Number).filter(Number.isFinite);
+  const averageLatency = latency.length ? latency.reduce((sum, value) => sum + value, 0) / latency.length : 0;
+  const processTotal = Number(processSummary.total || snapshot?.processes?.items?.length || 0);
+  const processRunning = Number(processSummary.running || 0);
+  if (id === "cpu") return {
+    value: String(Math.round(Number(cpu.percent || 0))), unit: "%", pct: clamp(cpu.percent || 0),
+    detail: `${system.physical_cpus || "--"} ${localized("physical", "核")} · ${localized("Load", "负载")} ${Number(cpu.load_1 || 0).toFixed(2)}`,
+    facts: [[localized("Temperature", "温度"), cpu.temperature?.available ? `${Number(cpu.temperature.temperature_c).toFixed(1)}°C` : "N/A"], [localized("Load", "负载"), Number(cpu.load_1 || 0).toFixed(2)], [localized("Cores", "核心"), String(system.logical_cpus || "--")]],
+  };
+  if (id === "memory") return {
+    value: String(Math.round(Number(memory.percent || 0))), unit: "%", pct: clamp(memory.percent || 0),
+    detail: `${formatBytes(memory.used_bytes || 0)} / ${formatBytes(memory.total_bytes || 0)}`,
+    facts: [[localized("Used", "已用"), formatBytes(memory.used_bytes || 0)], [localized("Total", "总量"), formatBytes(memory.total_bytes || 0)], [localized("Swap", "交换空间"), swap.total_bytes ? formatPct(swap.percent, 0) : "N/A"]],
+  };
+  if (id === "gpu") {
+    const available = Boolean(gpu.available && gpu.utilization_percent !== null && gpu.utilization_percent !== undefined);
+    return {
+      value: available ? String(Math.round(Number(gpu.utilization_percent || 0))) : "--", unit: available ? "%" : "", pct: available ? clamp(gpu.utilization_percent || 0) : 0,
+      detail: available ? `${gpu.devices?.[0]?.name || "GPU"} · ${gpu.memory_used_bytes === null || gpu.memory_used_bytes === undefined ? "--" : formatBytes(gpu.memory_used_bytes)}` : gpu.note || "N/A",
+      facts: [[localized("Device", "设备"), gpu.devices?.[0]?.name || "N/A"], [localized("Memory", "显存"), gpu.memory_used_bytes === null || gpu.memory_used_bytes === undefined ? "N/A" : formatBytes(gpu.memory_used_bytes)], [localized("Source", "来源"), gpu.provider || "N/A"]],
+    };
+  }
+  if (id === "storage") return {
+    value: disks.length ? String(Math.round(Number(disk.percent || 0))) : "--", unit: disks.length ? "%" : "", pct: disks.length ? clamp(disk.percent || 0) : 0,
+    detail: disks.length ? `${formatBytes(disk.used_bytes || 0)} / ${formatBytes(disk.total_bytes || 0)}` : localized("Unavailable", "不可用"),
+    facts: [[localized("Available", "可用"), disks.length ? formatBytes(disk.free_bytes || 0) : "N/A"], [localized("Volume", "卷"), String(disks.length)], [localized("State", "健康"), healthDevice.health || healthDevice.smart_status || "N/A"]],
+  };
+  if (id === "network") {
+    const rate = simpleRateParts(combined);
+    return { value: rate.value, unit: rate.unit, pct: clamp(combined / networkPeak * 100), detail: `${localized("Down", "下行")} ${formatRate(download)} · ${localized("Up", "上行")} ${formatRate(upload)}`, facts: [[localized("Download", "下行"), formatRate(download)], [localized("Upload", "上行"), formatRate(upload)], [localized("Total", "合计"), formatRate(combined)]] };
+  }
+  if (id === "processes") return { value: formatNumber(processTotal), unit: "", pct: processTotal ? clamp(processRunning / processTotal * 100) : 0, detail: `${formatNumber(processRunning)} ${localized("running", "运行")} · ${formatNumber(processSummary.threads || 0)} ${localized("threads", "线程")}`, facts: [[localized("Running", "运行中"), formatNumber(processRunning)], [localized("Threads", "线程"), formatNumber(processSummary.threads || 0)], [localized("Total", "总计"), formatNumber(processTotal)]] };
+  if (id === "read") return { value: read.value, unit: read.unit, pct: clamp(Number(diskIo.read_bytes_per_s || 0) / (50 * 1024 ** 2) * 100), detail: `${diskIo.devices?.[0]?.device || "disk"} · ${formatNumber(diskIo.read_iops || 0)} IOPS`, facts: [[localized("Peak", "当前"), formatRate(diskIo.read_bytes_per_s || 0)], ["IOPS", formatNumber(diskIo.read_iops || 0)], [localized("Latency", "延迟"), `${Number(diskIo.read_latency_ms || 0).toFixed(1)}ms`]] };
+  if (id === "write") return { value: write.value, unit: write.unit, pct: clamp(Number(diskIo.write_bytes_per_s || 0) / (50 * 1024 ** 2) * 100), detail: `${diskIo.devices?.[0]?.device || "disk"} · ${formatNumber(diskIo.write_iops || 0)} IOPS`, facts: [[localized("Peak", "当前"), formatRate(diskIo.write_bytes_per_s || 0)], ["IOPS", formatNumber(diskIo.write_iops || 0)], [localized("Latency", "延迟"), `${Number(diskIo.write_latency_ms || 0).toFixed(1)}ms`]] };
+  if (id === "iops") return { value: formatNumber(totalIops), unit: "", pct: clamp(totalIops * .1), detail: `${localized("Read", "读")} ${formatNumber(diskIo.read_iops || 0)} · ${localized("Write", "写")} ${formatNumber(diskIo.write_iops || 0)}`, facts: [[localized("Read", "读"), formatNumber(diskIo.read_iops || 0)], [localized("Write", "写"), formatNumber(diskIo.write_iops || 0)], [localized("Device", "设备"), diskIo.devices?.[0]?.device || "--"]] };
+  if (id === "latency") return { value: averageLatency.toFixed(1), unit: "ms", pct: clamp(averageLatency * 20), detail: `${localized("Read", "读")} ${Number(diskIo.read_latency_ms || 0).toFixed(1)} · ${localized("Write", "写")} ${Number(diskIo.write_latency_ms || 0).toFixed(1)}`, facts: [[localized("Average", "平均"), `${averageLatency.toFixed(1)}ms`], [localized("Read", "读"), `${Number(diskIo.read_latency_ms || 0).toFixed(1)}ms`], [localized("Write", "写"), `${Number(diskIo.write_latency_ms || 0).toFixed(1)}ms`]] };
+  if (id === "down") return { value: down.value, unit: down.unit, pct: clamp(download / networkPeak * 100), detail: `${localized("Network", "网络")} · ${formatRate(download)}`, facts: [[localized("Download", "下行"), formatRate(download)], [localized("Upload", "上行"), formatRate(upload)], [localized("Total", "合计"), formatRate(combined)]] };
+  if (id === "up") return { value: up.value, unit: up.unit, pct: clamp(upload / networkPeak * 100), detail: `${localized("Network", "网络")} · ${formatRate(upload)}`, facts: [[localized("Upload", "上行"), formatRate(upload)], [localized("Download", "下行"), formatRate(download)], [localized("Total", "合计"), formatRate(combined)]] };
+  if (id === "services") {
+    const summary = state.services?.summary || {};
+    const total = Number(summary.total || 0);
+    const running = Number(summary.running || 0);
+    return { value: state.services?.available ? formatNumber(total) : "--", unit: "", pct: total ? clamp(running / total * 100) : 0, detail: state.services?.available ? `${formatNumber(running)} ${localized("running", "运行")} · ${state.services.provider || "--"}` : state.services?.note || localized("Unavailable", "不可用"), facts: [[localized("Total", "总计"), state.services?.available ? formatNumber(total) : "--"], [localized("Running", "运行中"), state.services?.available ? formatNumber(running) : "--"], [localized("Source", "来源"), state.services?.provider || "--"]] };
+  }
+  if (id === "containers") {
+    const summary = state.containers?.summary || {};
+    const running = Number(summary.running || 0);
+    const total = Number(summary.total || state.containers?.items?.length || 0);
+    return { value: state.containers?.available ? formatNumber(running) : "--", unit: "", pct: total ? clamp(running / total * 100) : 0, detail: state.containers?.available ? `${formatNumber(total)} ${localized("Total", "总计")} · ${state.containers.provider || "--"}` : state.containers?.note || localized("Unavailable", "不可用"), facts: [[localized("Running", "运行中"), state.containers?.available ? formatNumber(running) : "--"], [localized("Total", "总计"), state.containers?.available ? formatNumber(total) : "--"], [localized("Source", "来源"), state.containers?.provider || "--"]] };
+  }
+  return simpleQuotaModel(id);
+}
+
+function updateSimpleCardCount() {
+  const visible = METRIC_ORDER_DEFAULT.length - state.preferences.hidden_metric_cards.length;
+  el.simpleCardPickerBtn.textContent = localized(`Modules ${visible} / ${METRIC_ORDER_DEFAULT.length} ▾`, `显示模块 ${visible} / ${METRIC_ORDER_DEFAULT.length} ▾`);
+  document.querySelectorAll("[data-simple-picker-toggle]").forEach((input) => {
+    input.checked = !state.preferences.hidden_metric_cards.includes(input.dataset.simplePickerToggle);
+    input.nextElementSibling.textContent = simpleMetricLabel(SIMPLE_METRIC_BY_ID.get(input.dataset.simplePickerToggle), true);
+  });
+}
+
+function simpleMetricCardMarkup(metric) {
+  const flipped = state.simpleFlipped.has(metric.id);
+  const label = simpleMetricLabel(metric);
+  const description = simpleMetricLabel(metric, true);
+  const nameWidth = Math.max(3, ...label.split(/\s+/).map((word) => [...word].reduce((width, char) => width + (/[\u3400-\u9fff]/.test(char) ? 1 : .62), 0)));
+  return `<article class="simple-metric-card${flipped ? " is-flipped" : ""}" data-simple-metric-card="${metric.id}" draggable="true" tabindex="0" role="button" aria-pressed="${flipped}">
+    <div class="simple-metric-card-inner">
+      <div class="simple-metric-card-face simple-metric-card-front" aria-hidden="${flipped}" ${flipped ? "inert" : ""}>
+        <button class="simple-expand" data-simple-expand type="button" aria-label="${localized("Expand card", "全屏显示卡片")}" title="${localized("Expand card", "全屏显示卡片")}">⛶</button>
+        <span class="simple-metric-card-label" data-no-localize>${escapeHtml(label)}</span>
+        <span class="simple-metric-rpm">33 rpm</span>
+        <div class="simple-card-main">
+          <div class="simple-record" aria-hidden="true"><div class="simple-record-base"></div><div class="simple-record-spin"><i></i></div><div class="simple-record-rim"></div><div class="simple-record-orbit"><i></i></div><div class="simple-tonearm"><i></i></div><div class="simple-record-label"><span class="simple-record-label-name" style="--simple-name-width: ${nameWidth}" data-no-localize>${escapeHtml(label)}</span><span class="simple-record-label-reading"><strong>--</strong><span></span><small class="simple-engraved-detail"></small></span></div></div>
+          <div class="simple-card-copy"><span class="simple-copy-label" data-no-localize>${escapeHtml(label)}</span><div class="simple-copy-reading"><strong>--</strong><span></span></div><p class="simple-copy-detail"></p></div>
+        </div>
+        <div class="simple-card-footer"><span></span><span data-no-localize>${escapeHtml(description)}</span></div>
+      </div>
+      <div class="simple-metric-card-face simple-metric-card-back" aria-hidden="${!flipped}" ${flipped ? "" : "inert"}>
+        <div class="simple-back-head"><span class="simple-back-label" data-no-localize>${escapeHtml(label)}</span><span data-no-localize>${escapeHtml(description)}</span></div>
+        <div class="simple-back-reading"><strong>--</strong><span></span></div>
+        <div class="simple-card-facts"></div>
+        <button class="simple-card-full-link" data-open-full-dashboard type="button">${localized("Open full dashboard", "打开完整看板")} →</button>
+        <p class="simple-back-detail"></p>
+      </div>
+    </div>
+  </article>`;
+}
+
+function ensureSimpleMetricCards(force = false) {
+  if (state.preferences.dashboard_view !== "simple") return;
+  const signature = JSON.stringify([state.preferences.metric_order, state.preferences.hidden_metric_cards, state.preferences.language]);
+  if (!force && signature === state.simpleCardSignature) return;
+  closeSimpleFocus();
+  const visible = state.preferences.metric_order
+    .filter((id) => !state.preferences.hidden_metric_cards.includes(id))
+    .map((id) => SIMPLE_METRIC_BY_ID.get(id))
+    .filter(Boolean);
+  simpleCardObserver.disconnect();
+  el.simpleMetricGrid.innerHTML = visible.map(simpleMetricCardMarkup).join("");
+  el.simpleMetricGrid.querySelectorAll("[data-simple-metric-card]").forEach((card) => {
+    simpleCardObserver.observe(card);
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("[data-open-full-dashboard]")) return;
+      event.stopPropagation();
+      if (state.suppressMetricClick) return;
+      if (event.target.closest("[data-simple-expand]")) { toggleSimpleFocus(card); return; }
+      clearTimeout(card._clickTimer);
+      if (event.detail < 2) card._clickTimer = setTimeout(() => {
+        if (card.isConnected) flipSimpleMetricCard(card);
+      }, 280);
+    });
+    card.addEventListener("dblclick", (event) => {
+      if (event.target.closest("button")) return;
+      event.preventDefault();
+      clearTimeout(card._clickTimer);
+      if (!state.suppressMetricClick) toggleSimpleFocus(card);
+    });
+  });
+  state.simpleCardSignature = signature;
+  layoutSimpleCards();
+}
+
+// Balance the last row instead of creating an ultrawide 8 + 1 arrangement.
+function layoutSimpleCards() {
+  if (state.preferences.dashboard_view !== "simple") return;
+  const count = el.simpleMetricGrid.childElementCount;
+  if (!count) return;
+  const size = state.preferences.simple_card_size;
+  const style = state.preferences.simple_style;
+  const scale = { small: .86, medium: 1, large: 1.18 }[size];
+  const textScale = { small: .95, medium: 1, large: 1.15 }[state.preferences.font_size];
+  const gridStyle = getComputedStyle(el.simpleMetricGrid);
+  const gap = parseFloat(gridStyle.columnGap) || 0;
+  const width = el.simpleMetricGrid.clientWidth - parseFloat(gridStyle.paddingLeft) - parseFloat(gridStyle.paddingRight);
+  const minWidth = ({ small: 250, medium: 320, large: 440 }[size]) + (style === "tonearm" ? 30 : 0);
+  let capacity = Math.max(1, Math.min({ small: 6, medium: 4, large: 3 }[size], Math.floor((width + gap) / (minWidth + gap))));
+  const availableHeight = window.innerHeight - Math.max(0, el.simpleMetricGrid.getBoundingClientRect().top) - parseFloat(gridStyle.paddingTop) - parseFloat(gridStyle.paddingBottom);
+  // Use more balanced rows on tall screens rather than a short strip above empty space.
+  if (size === "small") {
+    const targetHeight = style === "tonearm" ? 330 : 280;
+    const targetRows = Math.max(1, Math.min(Math.ceil(count / 2), Math.floor((availableHeight + gap) / (targetHeight + gap))));
+    capacity = Math.min(capacity, Math.max(1, Math.ceil(count / targetRows)));
+  }
+  const rows = Math.ceil(count / capacity);
+  const columns = Math.ceil(count / rows);
+  const cardWidth = (width - (columns - 1) * gap) / columns;
+  const stacked = style === "tonearm" && cardWidth < 360;
+  el.simpleMetricGrid.dataset.tonearmStacked = String(stacked);
+  const minHeight = stacked
+    ? 440 + (scale - 1) * 120 + (textScale - 1) * 80
+    : 320 * scale + (textScale - 1) * 100;
+  const height = Math.round(Math.max(minHeight, Math.min(size === "small" ? availableHeight : 440 * scale, (availableHeight - (rows - 1) * gap) / rows)));
+  const disc = style === "tonearm"
+    ? stacked
+      ? Math.min(300 * scale, cardWidth - 64, height - 200)
+      : Math.min(330 * scale, cardWidth * .48, cardWidth - (148 * textScale + 62), height - 52)
+    : Math.min(size === "small" ? 420 : 310 * scale, cardWidth - 64, height - (style === "engraved" ? 100 : 150));
+  el.simpleMetricGrid.style.setProperty("--simple-columns", columns);
+  el.simpleMetricGrid.style.setProperty("--simple-card-height", `${height}px`);
+  el.simpleMetricGrid.style.setProperty("--simple-disc-size", `${Math.max(80, disc)}px`);
+  layoutSimpleFocus();
+}
+
+const simpleCardObserver = new IntersectionObserver((entries) => {
+  entries.forEach(({ target, isIntersecting }) => target.classList.toggle("is-offscreen", !isIntersecting));
+}, { rootMargin: "80px" });
+let simpleLayoutFrame = null;
+new ResizeObserver(() => {
+  if (simpleLayoutFrame) return;
+  simpleLayoutFrame = requestAnimationFrame(() => { simpleLayoutFrame = null; layoutSimpleCards(); });
+}).observe(document.querySelector(".topbar"));
+window.addEventListener("resize", () => layoutSimpleCards());
+
+function updateSimpleMetricCards(snapshot = state.snapshot) {
+  if (state.preferences.dashboard_view !== "simple") return;
+  ensureSimpleMetricCards();
+  document.querySelectorAll("[data-simple-metric-card]").forEach((card) => {
+    const definition = SIMPLE_METRIC_BY_ID.get(card.dataset.simpleMetricCard);
+    if (!definition) return;
+    const model = simpleMetricModel(definition.id, snapshot);
+    model.detail = translateText(model.detail);
+    const pct = clamp(Number(model.pct || 0));
+    const signature = JSON.stringify([model, state.preferences.theme, state.preferences.simple_style]);
+    if (card._renderSignature === signature) return;
+    card._renderSignature = signature;
+    const deepLightness = ["dark", "deep"].includes(state.preferences.theme) ? .80 : .44;
+    card.style.setProperty("--metric-accent", `oklch(.62 .09 ${definition.hue})`);
+    card.style.setProperty("--metric-deep", `oklch(${deepLightness} .085 ${definition.hue})`);
+    card.style.setProperty("--metric-pale", `oklch(.94 .028 ${definition.hue})`);
+    card.style.setProperty("--simple-value-width", Math.max(2, String(model.value).length * .62));
+    card.style.setProperty("--metric-pct", `${pct.toFixed(1)}%`);
+    card.style.setProperty("--marker-angle", `${(pct * 3.6).toFixed(1)}deg`);
+    card.style.setProperty("--spin-duration", `${(8 - pct * .035).toFixed(1)}s`);
+    card.style.setProperty("--tonearm-angle", `${(-24 + pct * .12).toFixed(1)}deg`);
+    card.querySelector(".simple-metric-rpm").textContent = `${Math.round(33 + pct * .9)} ${localized("rpm", "转/分")}`;
+    card.querySelector(".simple-record-label-reading strong").textContent = model.value;
+    card.querySelector(".simple-record-label-reading > span").textContent = model.unit;
+    card.querySelector(".simple-engraved-detail").textContent = model.detail;
+    card.querySelector(".simple-copy-reading strong").textContent = model.value;
+    card.querySelector(".simple-copy-reading span").textContent = model.unit;
+    card.querySelector(".simple-copy-detail").textContent = model.detail;
+    card.querySelector(".simple-card-footer span:first-child").textContent = model.detail;
+    card.querySelector(".simple-card-footer span:first-child").title = model.detail;
+    card.querySelector(".simple-copy-detail").title = model.detail;
+    card.querySelector(".simple-engraved-detail").title = model.detail;
+    card.querySelector(".simple-back-reading strong").textContent = model.value;
+    card.querySelector(".simple-back-reading span").textContent = model.unit;
+    card.querySelector(".simple-back-detail").textContent = model.detail;
+    const facts = model.facts.map(([name, fact]) => `<span><small>${escapeHtml(name)}</small><b title="${escapeHtml(fact)}">${escapeHtml(fact)}</b></span>`).join("");
+    if (card._facts !== facts) {
+      card.querySelector(".simple-card-facts").innerHTML = facts;
+      card._facts = facts;
+    }
+    card.setAttribute("aria-label", `${simpleMetricLabel(definition)} ${model.value}${model.unit}. ${localized("Enter for details. Double-click or press F to expand.", "回车查看详情；双击或按 F 全屏显示。")}`);
+  });
+  updateSimpleCardCount();
+}
+
+function applyMetricOrder() {
+  const grid = document.querySelector(".metric-grid");
+  state.preferences.metric_order.forEach((id) => {
+    const card = grid.querySelector(`[data-metric-card="${id}"]`);
+    if (card) grid.appendChild(card);
+  });
+  ensureSimpleMetricCards(true);
+}
+
+function applyDashboardPresentation() {
+  const simple = state.preferences.dashboard_view === "simple";
+  document.body.dataset.dashboardView = state.preferences.dashboard_view;
+  document.body.dataset.simpleStyle = state.preferences.simple_style;
+  document.body.dataset.simpleCardSize = state.preferences.simple_card_size;
+  document.body.dataset.simpleSurface = ["dark", "deep"].includes(state.preferences.theme) ? "colophon" : "paper";
+  document.querySelectorAll("[data-dashboard-view-button]").forEach((button) => {
+    const active = button.dataset.dashboardViewButton === state.preferences.dashboard_view;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  document.querySelector(".metric-grid").hidden = simple;
+  el.simpleMetricGrid.hidden = !simple;
+  document.querySelectorAll("#mainContent > [data-dashboard-order]").forEach((section) => {
+    const hiddenByPreference = section.dataset.dashboardSection
+      ? state.preferences.hidden_sections.includes(section.dataset.dashboardSection)
+      : false;
+    section.hidden = simple || hiddenByPreference;
+  });
+  el.simpleCardPickerBtn.hidden = !simple;
+  el.simpleSurfaceToggle.hidden = !simple;
+  el.simpleSizeSwitcher.hidden = !simple;
+  const themeLabels = { light: ["Light", "浅色"], warm: ["Warm yellow", "浅黄色"], mint: ["Soft green", "浅绿色"], dark: ["Dark", "暗色"], deep: ["Deep", "深色"] };
+  el.simpleSurfaceToggle.textContent = localized(...themeLabels[state.preferences.theme]);
+  el.simpleSurfaceToggle.title = localized("Change dashboard theme", "切换看板主题");
+  el.simpleSizeSwitcher.querySelectorAll("[data-simple-card-size]").forEach((button) => {
+    const active = button.dataset.simpleCardSize === state.preferences.simple_card_size;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.textContent = localized(...({ small: ["S", "小"], medium: ["M", "中"], large: ["L", "大"] }[button.dataset.simpleCardSize]));
+  });
+  if (!simple) {
+    closeSimpleFocus();
+    simpleCardObserver.disconnect();
+    el.simpleMetricGrid.replaceChildren();
+    state.simpleCardSignature = "";
+    el.simpleCardPickerPanel.hidden = true;
+    el.simpleCardPickerBtn.setAttribute("aria-expanded", "false");
+  }
+  if (simple) {
+    stopRuntimePolling();
+    stopProcessPolling();
+    const visible = new Set(state.preferences.metric_order.filter((id) => !state.preferences.hidden_metric_cards.includes(id)));
+    if (visible.has("services") && !state.services) fetchServices();
+    if (visible.has("containers") && !state.containers) fetchContainers();
+  }
+  updateSimpleMetricCards();
+  layoutSimpleCards();
+}
+
+let simpleFocus = null;
+function layoutSimpleFocus() {
+  if (!simpleFocus) return;
+  const { stage } = simpleFocus;
+  const width = stage.clientWidth;
+  const height = stage.clientHeight;
+  const tonearm = state.preferences.simple_style === "tonearm";
+  const stacked = tonearm && width < 700;
+  stage.dataset.tonearmStacked = String(stacked);
+  const disc = tonearm && !stacked
+    ? Math.min(width * .5, height - 100, 700)
+    : Math.min(width - 64, height - (tonearm ? 220 : 160), 700);
+  stage.style.setProperty("--simple-card-height", `${height}px`);
+  stage.style.setProperty("--simple-disc-size", `${Math.max(80, disc)}px`);
+}
+
+function closeSimpleFocus() {
+  if (!simpleFocus) return;
+  const { dialog, card, placeholder, wasFlipped } = simpleFocus;
+  simpleFocus = null;
+  clearTimeout(card._clickTimer);
+  card.classList.remove("is-focused", "is-offscreen");
+  card.draggable = true;
+  if (card.classList.contains("is-flipped") !== wasFlipped) flipSimpleMetricCard(card);
+  placeholder.replaceWith(card);
+  dialog.close();
+  dialog.remove();
+  document.body.classList.remove("has-simple-focus");
+  simpleCardObserver.observe(card);
+  card.focus({ preventScroll: true });
+}
+
+function toggleSimpleFocus(card) {
+  if (simpleFocus) { closeSimpleFocus(); return; }
+  clearTimeout(card._clickTimer);
+  const placeholder = document.createElement("div");
+  placeholder.className = "simple-focus-placeholder";
+  placeholder.style.height = `${card.offsetHeight}px`;
+  const dialog = document.createElement("dialog");
+  dialog.className = "simple-focus-dialog";
+  dialog.setAttribute("aria-label", simpleMetricLabel(SIMPLE_METRIC_BY_ID.get(card.dataset.simpleMetricCard)));
+  dialog.innerHTML = `<header><span>${localized("Double-click the card or press Esc to exit", "双击卡片或按 Esc 退出")}</span><button type="button" data-close-simple-focus>${localized("Exit fullscreen", "退出全屏")} ×</button></header><div class="simple-metric-grid simple-focus-stage"></div>`;
+  const stage = dialog.querySelector(".simple-focus-stage");
+  const wasFlipped = card.classList.contains("is-flipped");
+  if (wasFlipped) flipSimpleMetricCard(card);
+  simpleCardObserver.unobserve(card);
+  card.replaceWith(placeholder);
+  stage.append(card);
+  card.classList.add("is-focused");
+  card.classList.remove("is-offscreen");
+  card.draggable = false;
+  document.body.append(dialog);
+  simpleFocus = { dialog, stage, card, placeholder, wasFlipped };
+  document.body.classList.add("has-simple-focus");
+  dialog.addEventListener("cancel", (event) => { event.preventDefault(); closeSimpleFocus(); });
+  dialog.querySelector("[data-close-simple-focus]").addEventListener("click", closeSimpleFocus);
+  dialog.showModal();
+  layoutSimpleFocus();
+  card.focus({ preventScroll: true });
+}
+
+function flipSimpleMetricCard(card) {
+  if (state.preferences.dashboard_view !== "simple" || state.suppressMetricClick) return;
+  const flipped = card.classList.toggle("is-flipped");
+  const id = card.dataset.simpleMetricCard;
+  if (flipped) state.simpleFlipped.add(id);
+  else state.simpleFlipped.delete(id);
+  card.setAttribute("aria-pressed", String(flipped));
+  card.querySelector(".simple-metric-card-front")?.setAttribute("aria-hidden", String(flipped));
+  card.querySelector(".simple-metric-card-back")?.setAttribute("aria-hidden", String(!flipped));
+  card.querySelector(".simple-metric-card-front").inert = flipped;
+  card.querySelector(".simple-metric-card-back").inert = !flipped;
+}
+
+async function changeDashboardView(view) {
+  if (!["full", "simple"].includes(view) || view === state.preferences.dashboard_view) return;
+  try {
+    await persistPreferences({ ...state.preferences, dashboard_view: view });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (error) {
+    showToast(error.message || localized("Could not save dashboard preferences", "无法保存看板设置"), true);
+  }
+}
+
+async function saveMetricOrder(metricOrder) {
+  const previous = [...state.preferences.metric_order];
+  state.preferences.metric_order = metricOrder;
+  applyMetricOrder();
+  try {
+    await persistPreferences({ ...state.preferences, metric_order: metricOrder }, false);
+    showToast(localized("Simple card order saved", "简洁卡片顺序已保存"));
+  } catch (error) {
+    state.preferences.metric_order = previous;
+    applyMetricOrder();
+    showToast(error.message || localized("Could not save dashboard preferences", "无法保存看板设置"), true);
+  }
+}
+
+async function changeSimpleCardSize(size) {
+  if (!["small", "medium", "large"].includes(size) || size === state.preferences.simple_card_size) return;
+  try {
+    await persistPreferences({ ...state.preferences, simple_card_size: size }, false);
+  } catch (error) {
+    showToast(error.message || localized("Could not save dashboard preferences", "无法保存看板设置"), true);
+  }
+}
+
+async function toggleSimpleSurface() {
+  const themes = ["light", "warm", "mint", "dark", "deep"];
+  const theme = themes[(themes.indexOf(state.preferences.theme) + 1) % themes.length];
+  try {
+    await persistPreferences({ ...state.preferences, theme }, false);
+  } catch (error) {
+    showToast(error.message || localized("Could not save dashboard preferences", "无法保存看板设置"), true);
+  }
+}
+
+async function changeSimpleCardVisibility(id, visible) {
+  if (!METRIC_ORDER_DEFAULT.includes(id)) return;
+  const hidden = new Set(state.preferences.hidden_metric_cards);
+  if (visible) hidden.delete(id);
+  else hidden.add(id);
+  if (hidden.size === METRIC_ORDER_DEFAULT.length) {
+    showToast(localized("Keep at least one simple card visible", "至少保留一张简洁卡片"), true);
+    updateSimpleCardCount();
+    return;
+  }
+  await saveSimpleVisibleModules([...hidden]);
+}
+
+async function saveSimpleVisibleModules(hidden) {
+  const controls = [...el.simpleCardPickerPanel.querySelectorAll("input, button")];
+  const focused = document.activeElement;
+  controls.forEach((control) => { control.disabled = true; });
+  try {
+    await persistPreferences({ ...state.preferences, hidden_metric_cards: hidden });
+  } catch (error) {
+    updateSimpleCardCount();
+    showToast(error.message || localized("Could not save dashboard preferences", "无法保存看板设置"), true);
+  } finally {
+    controls.forEach((control) => { control.disabled = false; });
+    if (controls.includes(focused) && !el.simpleCardPickerPanel.hidden) focused.focus({ preventScroll: true });
+  }
+}
+
 function applyPreferences(preferences, rerender = true) {
+  const previousView = state.preferences.dashboard_view;
   const previousLanguage = state.preferences.language;
   const previousPerformanceMode = state.preferences.performance_mode;
   state.preferences = normalizePreferences(preferences);
@@ -1528,9 +2144,11 @@ function applyPreferences(preferences, rerender = true) {
   try { localStorage.setItem("see-aicoding-font-size", state.preferences.font_size); } catch {}
   applyTheme();
   applySectionOrder();
+  applyMetricOrder();
   document.querySelectorAll("[data-dashboard-section]").forEach((section) => {
     section.hidden = state.preferences.hidden_sections.includes(section.dataset.dashboardSection);
   });
+  applyDashboardPresentation();
   el.showIdleAiToggle.checked = state.preferences.show_idle_ai;
   el.quotaGrid.hidden = !state.preferences.show_quota_cards;
   el.refreshQuotas.hidden = !state.preferences.show_quota_cards;
@@ -1556,6 +2174,15 @@ function applyPreferences(preferences, rerender = true) {
       startProcessPolling();
     }
   }
+  if (previousView !== state.preferences.dashboard_view) {
+    if (state.preferences.dashboard_view === "simple") releaseFullViewDetails();
+    else {
+      fetchSnapshot();
+      fetchHistory(state.historyRange);
+      if (state.providerUsage) renderProviderUsage(state.providerUsage);
+    }
+    startEvents();
+  }
 }
 
 async function fetchPreferences() {
@@ -1574,6 +2201,9 @@ function syncPreferenceControls(preferences) {
   document.querySelectorAll("[data-section-toggle]").forEach((input) => {
     input.checked = !value.hidden_sections.includes(input.dataset.sectionToggle);
   });
+  document.querySelectorAll("[data-metric-toggle]").forEach((input) => {
+    input.checked = !value.hidden_metric_cards.includes(input.dataset.metricToggle);
+  });
   document.querySelectorAll('input[name="dashboardDensity"]').forEach((input) => {
     input.checked = input.value === value.density;
   });
@@ -1585,6 +2215,9 @@ function syncPreferenceControls(preferences) {
   el.themeSelect.value = value.theme;
   el.fontSizeSelect.value = value.font_size;
   el.performanceMode.value = value.performance_mode;
+  el.dashboardViewSelect.value = value.dashboard_view;
+  el.simpleStyleSelect.value = value.simple_style;
+  el.simpleCardSizeSelect.value = value.simple_card_size;
   document.querySelectorAll("[data-quota-provider]").forEach((input) => {
     const key = `${input.dataset.quotaWindow}_used_percent`;
     const used = value.provider_quotas[input.dataset.quotaProvider]?.[key];
@@ -1600,6 +2233,9 @@ function readPreferencesFromControls() {
   const columns = ["identity", ...[...document.querySelectorAll("[data-process-column]")]
     .filter((input) => input.checked)
     .map((input) => input.dataset.processColumn)];
+  const hiddenMetricCards = [...document.querySelectorAll("[data-metric-toggle]")]
+    .filter((input) => !input.checked)
+    .map((input) => input.dataset.metricToggle);
   const density = document.querySelector('input[name="dashboardDensity"]:checked')?.value || "compact";
   const providerQuotas = {
     claude: { ...state.preferences.provider_quotas.claude },
@@ -1620,11 +2256,17 @@ function readPreferencesFromControls() {
     font_size: el.fontSizeSelect.value,
     language: el.languageSelect.value,
     theme: el.themeSelect.value,
+    dashboard_view: el.dashboardViewSelect.value,
+    simple_style: el.simpleStyleSelect.value,
+    simple_card_size: el.simpleCardSizeSelect.value,
+    simple_surface: state.preferences.simple_surface,
     performance_mode: el.performanceMode.value,
     hidden_sections: hidden,
+    hidden_metric_cards: hiddenMetricCards,
     show_idle_ai: state.preferences.show_idle_ai,
     show_quota_cards: el.showQuotaCardsSetting.checked,
     section_order: state.settingsDraft?.section_order || state.preferences.section_order,
+    metric_order: state.preferences.metric_order,
     process_columns: columns,
     provider_quotas: providerQuotas,
     quota_updated_at: state.preferences.quota_updated_at,
@@ -1783,6 +2425,10 @@ function quotaProviderNote(provider) {
 }
 
 function renderProviderUsage(model) {
+  if (state.preferences.dashboard_view === "simple") {
+    updateSimpleMetricCards();
+    return;
+  }
   const providers = model?.providers || [];
   const colors = { claude: "var(--claude)", chatgpt: "var(--codex)", cursor: "var(--cursor)" };
   el.quotaGrid.innerHTML = providers.length ? providers.map((provider) => {
@@ -1814,6 +2460,7 @@ function renderProviderUsage(model) {
       <span id="${descriptionId}" class="sr-only">${escapeHtml(providerNote)}</span>
     </article>`;
   }).join("") : `<div class="empty-state">${quotaLocale("No quota providers are available", "没有可用的额度服务")}</div>`;
+  updateSimpleMetricCards();
 }
 
 function scheduleQuotaRefreshPoll() {
@@ -1983,6 +2630,12 @@ function sectionNearViewport(id) {
 
 function renderAll() {
   if (!state.snapshot) return;
+  if (state.preferences.dashboard_view === "simple") {
+    const system = state.snapshot.system || {};
+    el.hostLine.textContent = `${system.user || "user"}@${system.hostname || "localhost"} · ${{ vinyl: localized("Vinyl record", "虫胶唱片"), tonearm: localized("Tonearm editorial", "唱臂与刊头"), engraved: localized("Engraved scale", "铜版刻度") }[state.preferences.simple_style]}`;
+    updateSimpleMetricCards();
+    return;
+  }
   renderOverview(state.snapshot);
   renderEvents(state.snapshot);
   if (sectionNearViewport("processes")) renderProcesses(state.snapshot);
@@ -1990,11 +2643,36 @@ function renderAll() {
   if (sectionNearViewport("coding")) renderAi(state.snapshot);
 }
 
+function releaseFullViewDetails() {
+  for (const snapshot of [state.snapshot, state.pendingSnapshot]) {
+    if (!snapshot) continue;
+    delete snapshot.zones;
+    delete snapshot.resources;
+    delete snapshot.processes;
+    delete snapshot.observability;
+    delete snapshot.ai;
+  }
+  for (const id of ["processTableBody", "aiZones", "quotaGrid", "topCpu", "topMemory", "topGpu", "resourceTrendChart", "eventTimeline", "diskGrid", "deviceIoList", "smartDeviceList", "sensorList"]) el[id]?.replaceChildren();
+  state.processRenderSignature = "";
+  state.eventRenderSignature = "";
+  state.historyRequest += 1;
+  state.historyModel = null;
+}
+
 function queueSnapshot(snapshot) {
+  // A full-view request may finish after the user has already switched views.
+  if (state.preferences.dashboard_view === "simple" && !snapshot.simple_view) {
+    snapshot = {
+      generated_at: snapshot.generated_at,
+      system: snapshot.system,
+      stream_compact: true,
+      simple_view: true,
+    };
+  }
   const fullSource = state.pendingSnapshot && !state.pendingSnapshot.stream_compact
     ? state.pendingSnapshot
     : state.snapshot;
-  if (snapshot.stream_compact && fullSource) {
+  if (snapshot.stream_compact && fullSource && state.preferences.dashboard_view !== "simple") {
     snapshot = {
       ...snapshot,
       process_detail_generated_at: fullSource.process_detail_generated_at || 0,
@@ -2148,14 +2826,18 @@ async function runProcessAction(action) {
 }
 
 async function fetchSnapshot() {
+  if (state.snapshotRequestInFlight || document.hidden || state.paused) return;
+  state.snapshotRequestInFlight = true;
   try {
-    const response = await fetch("/api/snapshot", { cache: "no-store" });
+    const response = await fetch(state.preferences.dashboard_view === "simple" ? "/api/snapshot?view=simple" : "/api/snapshot", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const snapshot = await response.json();
     if (!state.paused) queueSnapshot(snapshot);
     setConnection(state.paused ? "Paused" : "Live", state.paused ? "paused" : "live");
   } catch {
     setConnection("Offline", "error");
+  } finally {
+    state.snapshotRequestInFlight = false;
   }
 }
 
@@ -2187,7 +2869,7 @@ function startEvents() {
     return;
   }
   const interval = PERFORMANCE_INTERVALS[state.preferences.performance_mode] || 3;
-  state.eventSource = new EventSource(`/events?interval=${encodeURIComponent(interval)}`);
+  state.eventSource = new EventSource(`/events?interval=${encodeURIComponent(interval)}&view=${state.preferences.dashboard_view}`);
   state.eventSource.addEventListener("snapshot", (event) => {
     if (state.paused || document.hidden) return;
     try {
@@ -2249,6 +2931,26 @@ function stopProcessPolling() {
 }
 
 document.addEventListener("click", (event) => {
+  const fullDashboardButton = event.target.closest("[data-open-full-dashboard]");
+  if (fullDashboardButton) {
+    event.stopPropagation();
+    changeDashboardView("full");
+    return;
+  }
+  const dashboardViewButton = event.target.closest("[data-dashboard-view-button]");
+  if (dashboardViewButton) {
+    changeDashboardView(dashboardViewButton.dataset.dashboardViewButton);
+    return;
+  }
+  const cardSizeButton = event.target.closest("[data-simple-card-size]");
+  if (cardSizeButton) {
+    changeSimpleCardSize(cardSizeButton.dataset.simpleCardSize);
+    return;
+  }
+  if (event.target.closest("#simpleSurfaceToggle")) {
+    toggleSimpleSurface();
+    return;
+  }
   const aiSessionToggle = event.target.closest("[data-ai-session-toggle]");
   if (aiSessionToggle) {
     const sessionId = aiSessionToggle.dataset.aiSessionToggle;
@@ -2304,6 +3006,31 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  const metricCard = event.target.closest("[data-simple-metric-card]");
+  if (metricCard && event.target === metricCard && state.preferences.dashboard_view === "simple") {
+    if (event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      toggleSimpleFocus(metricCard);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      flipSimpleMetricCard(metricCard);
+      return;
+    }
+    if (!simpleFocus && event.altKey && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
+      event.preventDefault();
+      const order = [...state.preferences.metric_order];
+      const index = order.indexOf(metricCard.dataset.simpleMetricCard);
+      const nextIndex = index + (event.key === "ArrowLeft" ? -1 : 1);
+      if (index >= 0 && nextIndex >= 0 && nextIndex < order.length) {
+        [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
+        saveMetricOrder(order);
+        metricCard.focus();
+      }
+      return;
+    }
+  }
   if ((event.key === "Enter" || event.key === " ") && event.target.matches("tr[data-pid]")) {
     event.preventDefault();
     openProcess(event.target.dataset.pid);
@@ -2312,11 +3039,56 @@ document.addEventListener("keydown", (event) => {
     el.customizeMenu.open = false;
     return;
   }
+  if (event.key === "Escape" && !el.simpleCardPickerPanel.hidden) {
+    el.simpleCardPickerPanel.hidden = true;
+    el.simpleCardPickerBtn.setAttribute("aria-expanded", "false");
+    el.simpleCardPickerBtn.focus();
+    return;
+  }
   if (event.key === "Escape" && state.selectedPid) closeProcess();
+});
+
+document.addEventListener("dragstart", (event) => {
+  const card = event.target.closest("[data-simple-metric-card]");
+  if (!card || state.preferences.dashboard_view !== "simple") return;
+  state.draggedMetricId = card.dataset.simpleMetricCard;
+  state.suppressMetricClick = true;
+  card.classList.add("is-dragging");
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", state.draggedMetricId);
+  }
+});
+
+document.addEventListener("dragover", (event) => {
+  const card = event.target.closest("[data-simple-metric-card]");
+  if (!card || !state.draggedMetricId || state.preferences.dashboard_view !== "simple") return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+});
+
+document.addEventListener("drop", (event) => {
+  const card = event.target.closest("[data-simple-metric-card]");
+  const from = state.draggedMetricId;
+  if (!card || !from || state.preferences.dashboard_view !== "simple") return;
+  event.preventDefault();
+  const to = card.dataset.simpleMetricCard;
+  if (from !== to) {
+    const order = state.preferences.metric_order.filter((id) => id !== from);
+    order.splice(order.indexOf(to), 0, from);
+    saveMetricOrder(order);
+  }
+});
+
+document.addEventListener("dragend", (event) => {
+  event.target.closest("[data-simple-metric-card]")?.classList.remove("is-dragging");
+  state.draggedMetricId = null;
+  window.setTimeout(() => { state.suppressMetricClick = false; }, 0);
 });
 
 el.pauseBtn.addEventListener("click", () => {
   state.paused = !state.paused;
+  document.body.classList.toggle("is-paused", state.paused);
   el.pauseBtn.classList.toggle("is-paused", state.paused);
   el.pauseBtn.setAttribute("aria-label", state.paused ? "Resume live updates" : "Pause live updates");
   const label = el.pauseBtn.querySelector(".pause-label");
@@ -2334,6 +3106,22 @@ el.pauseBtn.addEventListener("click", () => {
     scheduleQuotaRefreshPoll();
   }
   localizeDom(el.pauseBtn);
+});
+
+el.simpleCardPickerBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const open = el.simpleCardPickerPanel.hidden;
+  el.simpleCardPickerPanel.hidden = !open;
+  el.simpleCardPickerBtn.setAttribute("aria-expanded", String(open));
+  if (open) el.simpleCardPickerPanel.querySelector("input:checked")?.focus({ preventScroll: true });
+});
+
+el.simpleCardPickerPanel.addEventListener("click", (event) => {
+  const preset = event.target.closest("[data-simple-module-preset]")?.dataset.simpleModulePreset;
+  if (!preset) return;
+  const ai = ["claude", "chatgpt", "cursor"];
+  const hidden = preset === "all" ? [] : preset === "ai" ? METRIC_ORDER_DEFAULT.filter((id) => !ai.includes(id)) : preset === "system" ? ai : DEFAULT_HIDDEN_METRIC_CARDS;
+  saveSimpleVisibleModules(hidden);
 });
 
 el.processSearch.addEventListener("input", (event) => {
@@ -2363,7 +3151,11 @@ el.showMoreProcesses.addEventListener("click", () => {
 el.saveThresholds.addEventListener("click", saveThresholds);
 
 document.addEventListener("change", (event) => {
-  if (event.target.closest(".customize-popover") && event.target.matches("[data-section-toggle], [data-process-column], [data-quota-provider], input[name='dashboardDensity'], #showQuotaCardsSetting, #languageSelect, #themeSelect, #fontSizeSelect, #performanceMode")) {
+  if (event.target.matches("[data-simple-picker-toggle]")) {
+    changeSimpleCardVisibility(event.target.dataset.simplePickerToggle, event.target.checked);
+    return;
+  }
+  if (event.target.closest(".customize-popover") && event.target.matches("[data-section-toggle], [data-metric-toggle], [data-process-column], [data-quota-provider], input[name='dashboardDensity'], #showQuotaCardsSetting, #languageSelect, #themeSelect, #fontSizeSelect, #performanceMode, #dashboardViewSelect, #simpleStyleSelect, #simpleCardSizeSelect, #simpleSurfaceSelect")) {
     markSettingsDirty();
   }
 });
@@ -2374,11 +3166,17 @@ el.resetPreferences.addEventListener("click", () => {
     font_size: "medium",
     language: "en",
     theme: "deep",
+    dashboard_view: "full",
+    simple_style: "tonearm",
+    simple_card_size: "medium",
+    simple_surface: "paper",
     performance_mode: "balanced",
     hidden_sections: [],
+    hidden_metric_cards: [...DEFAULT_HIDDEN_METRIC_CARDS],
     show_idle_ai: false,
     show_quota_cards: true,
     section_order: [...SECTION_ORDER_DEFAULT],
+    metric_order: [...METRIC_ORDER_DEFAULT],
     process_columns: ["identity", "pid", "user", "state", "cpu", "memory", "gpu", "disk", "network", "threads", "age"],
     provider_quotas: {
       claude: { five_hour_used_percent: null, weekly_used_percent: null },
@@ -2406,6 +3204,10 @@ el.customizeMenu.addEventListener("toggle", () => {
 });
 
 document.addEventListener("pointerdown", (event) => {
+  if (!el.simpleCardPickerPanel.hidden && !event.target.closest("#simpleCardPickerPanel") && !event.target.closest("#simpleCardPickerBtn")) {
+    el.simpleCardPickerPanel.hidden = true;
+    el.simpleCardPickerBtn.setAttribute("aria-expanded", "false");
+  }
   if (el.customizeMenu.open && !event.target.closest("#customizeMenu")) {
     el.customizeMenu.open = false;
   }
@@ -2477,7 +3279,7 @@ const sectionObserver = new IntersectionObserver((entries) => {
       return;
     }
     if (id === "processes" && !entry.isIntersecting) stopProcessPolling();
-    if (!entry.isIntersecting || !state.snapshot) return;
+    if (!entry.isIntersecting || entry.target.hidden || !state.snapshot || state.preferences.dashboard_view === "simple") return;
     if (id === "processes") {
       renderProcesses(state.snapshot);
       startProcessPolling();
@@ -2490,6 +3292,7 @@ const sectionObserver = new IntersectionObserver((entries) => {
 document.querySelectorAll("[data-dashboard-order]").forEach((section) => sectionObserver.observe(section));
 
 document.addEventListener("visibilitychange", () => {
+  document.body.classList.toggle("is-background", document.hidden);
   if (document.hidden) {
     stopEvents();
     stopRuntimePolling();
@@ -2508,7 +3311,7 @@ async function bootstrap() {
   await fetchPreferences();
   if (state.preferences.show_quota_cards) await fetchProviderUsage();
   startEvents();
-  fetchHistory(state.historyRange);
+  if (state.preferences.dashboard_view !== "simple") fetchHistory(state.historyRange);
   localizeDom();
 }
 

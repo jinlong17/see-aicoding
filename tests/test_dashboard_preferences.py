@@ -83,22 +83,37 @@ class DashboardPreferencesTests(unittest.TestCase):
         result = normalize_dashboard_preferences(
             {
                 "density": "huge",
+                "dashboard_view": "tiny",
+                "simple_style": "glass",
                 "hidden_sections": ["runtime", "unknown", "runtime"],
+                "hidden_metric_cards": ["gpu", "unknown", "gpu"],
                 "show_idle_ai": 1,
                 "section_order": ["storage", "unknown", "storage", "coding"],
+                "metric_order": ["network", "unknown", "network", "cpu"],
                 "process_columns": ["cpu", "unknown"],
             }
         )
 
         self.assertEqual(result["density"], "compact")
         self.assertEqual(result["font_size"], "medium")
+        self.assertEqual(result["dashboard_view"], "full")
+        self.assertEqual(result["simple_style"], "tonearm")
         self.assertEqual(result["hidden_sections"], ["runtime"])
+        self.assertEqual(result["hidden_metric_cards"], ["gpu"])
         self.assertTrue(result["show_idle_ai"])
         self.assertEqual(
             result["section_order"],
             ["storage", "coding", "overview", "leaders", "processes", "runtime"],
         )
         self.assertEqual(result["process_columns"], ["identity", "cpu"])
+        self.assertEqual(
+            result["metric_order"],
+            [
+                "network", "cpu", "memory", "gpu", "storage", "processes",
+                "read", "write", "iops", "latency", "down", "up",
+                "services", "containers", "claude", "chatgpt", "cursor",
+            ],
+        )
 
     def test_defaults_are_returned_for_non_object_input(self) -> None:
         result = normalize_dashboard_preferences(None)
@@ -107,6 +122,15 @@ class DashboardPreferencesTests(unittest.TestCase):
         self.assertEqual(result["font_size"], "medium")
         self.assertEqual(result["language"], "en")
         self.assertEqual(result["theme"], "deep")
+        self.assertEqual(result["dashboard_view"], "full")
+        self.assertEqual(result["simple_style"], "tonearm")
+        self.assertEqual(result["simple_card_size"], "medium")
+        self.assertEqual(result["simple_surface"], "paper")
+        self.assertEqual(len(result["metric_order"]), 17)
+        self.assertEqual(
+            result["hidden_metric_cards"],
+            ["read", "write", "iops", "latency", "down", "up", "services", "containers"],
+        )
         self.assertEqual(result["performance_mode"], "balanced")
         self.assertEqual(result["hidden_sections"], [])
         self.assertTrue(result["show_quota_cards"])
@@ -122,6 +146,10 @@ class DashboardPreferencesTests(unittest.TestCase):
             {
                 "language": "zh-CN",
                 "theme": "mint",
+                "dashboard_view": "simple",
+                "simple_style": "engraved",
+                "simple_card_size": "large",
+                "simple_surface": "colophon",
                 "font_size": "large",
                 "performance_mode": "efficient",
                 "show_quota_cards": False,
@@ -143,6 +171,10 @@ class DashboardPreferencesTests(unittest.TestCase):
 
         self.assertEqual(result["language"], "zh-CN")
         self.assertEqual(result["theme"], "mint")
+        self.assertEqual(result["dashboard_view"], "simple")
+        self.assertEqual(result["simple_style"], "engraved")
+        self.assertEqual(result["simple_card_size"], "large")
+        self.assertEqual(result["simple_surface"], "colophon")
         self.assertEqual(result["font_size"], "large")
         self.assertEqual(result["performance_mode"], "efficient")
         self.assertFalse(result["show_quota_cards"])
@@ -170,6 +202,10 @@ class DashboardPreferencesTests(unittest.TestCase):
             {
                 "language": "fr",
                 "theme": "neon",
+                "dashboard_view": "tiny",
+                "simple_style": "glass",
+                "simple_card_size": "giant",
+                "simple_surface": "glass",
                 "font_size": "tiny",
                 "performance_mode": "turbo",
                 "quota_updated_at": "yesterday",
@@ -178,9 +214,57 @@ class DashboardPreferencesTests(unittest.TestCase):
 
         self.assertEqual(result["language"], "en")
         self.assertEqual(result["theme"], "deep")
+        self.assertEqual(result["dashboard_view"], "full")
+        self.assertEqual(result["simple_style"], "tonearm")
+        self.assertEqual(result["simple_card_size"], "medium")
+        self.assertEqual(result["simple_surface"], "paper")
         self.assertEqual(result["font_size"], "medium")
         self.assertEqual(result["performance_mode"], "balanced")
         self.assertIsNone(result["quota_updated_at"])
+
+    def test_simple_mode_never_hides_every_metric_card(self) -> None:
+        result = normalize_dashboard_preferences(
+            {
+                "hidden_metric_cards": [
+                    "cpu",
+                    "memory",
+                    "gpu",
+                    "storage",
+                    "network",
+                    "processes",
+                    "read",
+                    "write",
+                    "iops",
+                    "latency",
+                    "down",
+                    "up",
+                    "services",
+                    "containers",
+                    "claude",
+                    "chatgpt",
+                    "cursor",
+                ]
+            }
+        )
+
+        self.assertEqual(
+            result["hidden_metric_cards"],
+            ["read", "write", "iops", "latency", "down", "up", "services", "containers"],
+        )
+
+    def test_legacy_six_card_preferences_migrate_to_core_plus_ai_defaults(self) -> None:
+        result = normalize_dashboard_preferences(
+            {
+                "metric_order": ["cpu", "gpu", "memory", "storage", "network", "processes"],
+                "hidden_metric_cards": [],
+            }
+        )
+
+        visible = set(result["metric_order"]) - set(result["hidden_metric_cards"])
+        self.assertEqual(
+            visible,
+            {"cpu", "memory", "gpu", "storage", "network", "processes", "claude", "chatgpt", "cursor"},
+        )
 
     def test_updating_quota_visibility_pauses_the_collector(self) -> None:
         current = normalize_dashboard_preferences({"show_quota_cards": True})

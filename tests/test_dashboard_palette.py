@@ -75,6 +75,32 @@ class DashboardPaletteTests(unittest.TestCase):
         self.assertIn(':root[data-font-size="large"]', css)
         self.assertIn('PERFORMANCE_INTERVALS = { realtime: 1.5, balanced: 3, efficient: 5 }', javascript)
 
+    def test_three_simple_dashboard_styles_share_live_metric_cards(self) -> None:
+        css = CSS_PATH.read_text(encoding="utf-8")
+        javascript = JS_PATH.read_text(encoding="utf-8")
+        html = HTML_PATH.read_text(encoding="utf-8")
+
+        for style in ("vinyl", "tonearm", "engraved"):
+            self.assertIn(f'data-simple-style="{style}"', css)
+            self.assertIn(f'<option value="{style}">', html)
+        self.assertIn('data-dashboard-view-button="simple"', html)
+        self.assertIn('data-dashboard-view-button="full"', html)
+        self.assertIn('id="simpleStyleSelect"', html)
+        self.assertIn('id="dashboardViewSelect"', html)
+        self.assertIn('id="simpleCardSizeSelect"', html)
+        self.assertNotIn('id="simpleSurfaceSelect"', html)
+        self.assertIn('id="simpleMetricGrid"', html)
+        self.assertEqual(html.count('data-metric-card="'), 6)
+        self.assertEqual(html.count('data-simple-picker-toggle="'), 17)
+        self.assertIn("const SIMPLE_METRIC_DEFINITIONS = [", javascript)
+        self.assertIn("function ensureSimpleMetricCards", javascript)
+        self.assertIn("function updateSimpleMetricCards", javascript)
+        self.assertIn("function applyDashboardPresentation()", javascript)
+        self.assertIn("@keyframes simple-record-spin", css)
+        self.assertIn("animation: simple-record-spin", css)
+        self.assertIn("metric_order", javascript)
+        self.assertIn("hidden_metric_cards", javascript)
+
     def test_settings_use_an_explicit_save_and_discard_outside_clicks(self) -> None:
         javascript = JS_PATH.read_text(encoding="utf-8")
 
@@ -89,7 +115,7 @@ class DashboardPaletteTests(unittest.TestCase):
     def test_frontend_uses_compact_stream_and_lazy_runtime_polling(self) -> None:
         javascript = JS_PATH.read_text(encoding="utf-8")
 
-        self.assertIn('new EventSource(`/events?interval=${encodeURIComponent(interval)}`)', javascript)
+        self.assertIn('new EventSource(`/events?interval=${encodeURIComponent(interval)}&view=${state.preferences.dashboard_view}`)', javascript)
         self.assertIn('new IntersectionObserver', javascript)
         self.assertIn('snapshot.stream_compact', javascript)
         self.assertNotIn('setInterval(fetchNetworkAttribution, 4000)', javascript)

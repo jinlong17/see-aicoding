@@ -4,12 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="Compact local system monitoring for CPU, GPU, memory, storage, processes, services, network activity, containers, and AI coding workloads.">
+  <meta name="description" content="Local system and AI coding dashboard: full monitoring, three animated simple views, 17 selectable modules, Chinese/English settings, and full-window cards.">
   <title>see-aicoding · System monitor</title>
   <script>try{document.documentElement.dataset.theme=localStorage.getItem("see-aicoding-theme")||"deep";document.documentElement.dataset.fontSize=localStorage.getItem("see-aicoding-font-size")||"medium"}catch{}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&amp;family=Lora:wght@400;500;600&amp;display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body data-density="compact">
+<body data-density="compact" data-dashboard-view="full" data-simple-style="tonearm" data-simple-card-size="medium" data-simple-surface="paper">
   <a class="skip-link" href="#mainContent">Skip to dashboard</a>
 
   <div class="app-shell">
@@ -31,6 +34,17 @@
         <div id="connectionState" class="connection is-waiting" role="status">
           <span class="connection-dot" aria-hidden="true"></span><span>Connecting</span>
         </div>
+        <button id="simpleCardPickerBtn" class="simple-card-count" type="button" aria-label="Choose simple mode cards" aria-expanded="false" aria-controls="simpleCardPickerPanel" hidden>Modules 9 / 17 ▾</button>
+        <button id="simpleSurfaceToggle" class="simple-surface-toggle" type="button" hidden>Paper</button>
+        <div id="simpleSizeSwitcher" class="simple-size-switcher" role="group" aria-label="Simple card size" hidden>
+          <button data-simple-card-size="small" type="button" aria-pressed="false" title="Small cards">S</button>
+          <button class="is-active" data-simple-card-size="medium" type="button" aria-pressed="true" title="Medium cards">M</button>
+          <button data-simple-card-size="large" type="button" aria-pressed="false" title="Large cards">L</button>
+        </div>
+        <div class="view-switcher segmented compact" role="group" aria-label="Dashboard view">
+          <button data-dashboard-view-button="simple" type="button" aria-pressed="false">Simple</button>
+          <button class="is-active" data-dashboard-view-button="full" type="button" aria-pressed="true">Full</button>
+        </div>
         <button id="pauseBtn" class="tool-btn" type="button" aria-label="Pause live updates">
           <span class="pause-icon" aria-hidden="true"></span><span class="pause-label">Pause</span>
         </button>
@@ -44,6 +58,9 @@
               <label class="select-setting"><span>Theme</span><select id="themeSelect"><option value="light">Light</option><option value="warm">Warm yellow</option><option value="mint">Soft green</option><option value="dark">Dark</option><option value="deep">Deep</option></select></label>
               <label class="select-setting"><span>Text size</span><select id="fontSizeSelect"><option value="small">Small</option><option value="medium">Standard</option><option value="large">Large</option></select></label>
               <label class="select-setting"><span>Refresh</span><select id="performanceMode"><option value="realtime">Real-time · 1.5s</option><option value="balanced">Balanced · 3s</option><option value="efficient">Efficient · 5s</option></select></label>
+              <label class="select-setting"><span>Dashboard view</span><select id="dashboardViewSelect"><option value="full">Full</option><option value="simple">Simple</option></select></label>
+              <label class="select-setting"><span>Simple style</span><select id="simpleStyleSelect"><option value="vinyl">Vinyl record</option><option value="tonearm">Tonearm editorial</option><option value="engraved">Engraved scale</option></select></label>
+              <label class="select-setting"><span>Simple card size</span><select id="simpleCardSizeSelect"><option value="small">Small</option><option value="medium">Standard</option><option value="large">Large</option></select></label>
             </fieldset>
             <fieldset>
               <legend>Density</legend>
@@ -57,6 +74,29 @@
               <label><input type="checkbox" data-section-toggle="storage" checked> Storage</label>
               <label><input type="checkbox" data-section-toggle="runtime" checked> Runtime</label>
               <label><input type="checkbox" data-section-toggle="coding" checked> Coding sessions</label>
+            </fieldset>
+            <fieldset>
+              <legend>Simple mode cards</legend>
+              <p class="customize-note">Choose visible cards here. Drag cards on the simple dashboard to reorder them.</p>
+              <div class="column-options metric-card-options">
+                <label><input type="checkbox" data-metric-toggle="cpu" checked> CPU</label>
+                <label><input type="checkbox" data-metric-toggle="memory" checked> Memory</label>
+                <label><input type="checkbox" data-metric-toggle="gpu" checked> GPU</label>
+                <label><input type="checkbox" data-metric-toggle="storage" checked> Storage</label>
+                <label><input type="checkbox" data-metric-toggle="network" checked> Network</label>
+                <label><input type="checkbox" data-metric-toggle="processes" checked> Processes</label>
+                <label><input type="checkbox" data-metric-toggle="claude" checked> Claude remaining</label>
+                <label><input type="checkbox" data-metric-toggle="chatgpt" checked> ChatGPT remaining</label>
+                <label><input type="checkbox" data-metric-toggle="cursor" checked> Cursor remaining</label>
+                <label><input type="checkbox" data-metric-toggle="read"> Disk read</label>
+                <label><input type="checkbox" data-metric-toggle="write"> Disk write</label>
+                <label><input type="checkbox" data-metric-toggle="iops"> IOPS</label>
+                <label><input type="checkbox" data-metric-toggle="latency"> I/O latency</label>
+                <label><input type="checkbox" data-metric-toggle="down"> Download</label>
+                <label><input type="checkbox" data-metric-toggle="up"> Upload</label>
+                <label><input type="checkbox" data-metric-toggle="services"> System services</label>
+                <label><input type="checkbox" data-metric-toggle="containers"> Containers</label>
+              </div>
             </fieldset>
             <fieldset>
               <legend>Section order</legend>
@@ -94,34 +134,57 @@
       </div>
     </header>
 
+    <section id="simpleCardPickerPanel" class="simple-card-picker-panel" aria-label="Simple mode cards" hidden>
+      <div class="simple-picker-heading"><strong>Visible modules</strong><p>Select modules to display. Changes are saved automatically.</p></div>
+      <div class="simple-picker-presets"><button type="button" data-simple-module-preset="all">All modules</button><button type="button" data-simple-module-preset="system">System only</button><button type="button" data-simple-module-preset="ai">AI only</button><button type="button" data-simple-module-preset="default">Default modules</button></div>
+      <label><input type="checkbox" data-simple-picker-toggle="cpu" checked> <span>CPU</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="memory" checked> <span>Memory</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="gpu" checked> <span>GPU</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="storage" checked> <span>Storage</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="network" checked> <span>Network</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="processes" checked> <span>Processes</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="claude" checked> <span>Claude remaining</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="chatgpt" checked> <span>ChatGPT remaining</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="cursor" checked> <span>Cursor remaining</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="read"> <span>Disk read</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="write"> <span>Disk write</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="iops"> <span>IOPS</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="latency"> <span>I/O latency</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="down"> <span>Download</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="up"> <span>Upload</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="services"> <span>System services</span></label>
+      <label><input type="checkbox" data-simple-picker-toggle="containers"> <span>Containers</span></label>
+    </section>
+
     <main id="mainContent">
+      <section id="simpleMetricGrid" class="simple-metric-grid" aria-label="Simple system overview" hidden></section>
       <section class="metric-grid" aria-label="System overview">
-        <article class="metric-card metric-cpu">
+        <article class="metric-card metric-cpu" data-metric-card="cpu">
           <div class="metric-head"><span class="metric-label">CPU</span><span class="metric-status-group"><span id="cpuTemperature" class="metric-state">Temp --</span><span id="cpuState" class="metric-state">Reading</span></span></div>
           <div class="metric-body"><div><div class="metric-reading"><strong id="cpuValue">--</strong><span>%</span></div><p id="cpuDetail">Waiting for processor data</p></div><div id="cpuChart" class="metric-gauge" aria-label="CPU utilization"><span>--</span></div></div>
           <div class="meter" aria-hidden="true"><span id="cpuMeter"></span></div>
         </article>
-        <article id="gpuMetricCard" class="metric-card metric-gpu" data-auto-card="gpu">
+        <article id="gpuMetricCard" class="metric-card metric-gpu" data-auto-card="gpu" data-metric-card="gpu">
           <div class="metric-head"><span class="metric-label">GPU</span><span id="gpuState" class="metric-state">Detecting</span></div>
           <div class="metric-body"><div><div class="metric-reading"><strong id="gpuValue">--</strong><span>%</span></div><p id="gpuDetail">Waiting for GPU telemetry</p></div><div id="gpuChart" class="metric-gauge" aria-label="GPU utilization"><span>--</span></div></div>
           <div class="meter" aria-hidden="true"><span id="gpuMeter"></span></div>
         </article>
-        <article class="metric-card metric-memory">
+        <article class="metric-card metric-memory" data-metric-card="memory">
           <div class="metric-head"><span class="metric-label">Memory</span><span id="memoryState" class="metric-state">Reading</span></div>
           <div class="metric-body"><div><div class="metric-reading"><strong id="memoryValue">--</strong><span>%</span></div><p id="memoryDetail">Waiting for memory data</p></div><div id="memoryChart" class="metric-gauge" aria-label="Memory utilization"><span>--</span></div></div>
           <div class="meter" aria-hidden="true"><span id="memoryMeter"></span></div>
         </article>
-        <article class="metric-card metric-storage">
+        <article class="metric-card metric-storage" data-metric-card="storage">
           <div class="metric-head"><span class="metric-label">Storage</span><span id="storageState" class="metric-state">Reading</span></div>
           <div class="metric-body"><div><div class="metric-reading"><strong id="storageValue">--</strong><span>%</span></div><p id="storageDetail">Waiting for local volumes</p></div><div id="storageChart" class="metric-gauge" aria-label="Storage utilization"><span>--</span></div></div>
           <div class="meter" aria-hidden="true"><span id="storageMeter"></span></div>
         </article>
-        <article class="metric-card metric-network">
+        <article class="metric-card metric-network" data-metric-card="network">
           <div class="metric-head"><span class="metric-label">Network</span><span class="metric-state is-good">Live</span></div>
           <div class="metric-body"><div><div class="metric-reading metric-rate"><strong id="networkValue">--</strong></div><p id="networkDetail">Waiting for interface activity</p></div><div id="networkChart" class="metric-gauge" aria-label="Network activity"><span>--</span></div></div>
           <div class="meter" aria-hidden="true"><span id="networkMeter"></span></div>
         </article>
-        <article class="metric-card metric-processes">
+        <article class="metric-card metric-processes" data-metric-card="processes">
           <div class="metric-head"><span class="metric-label">Processes</span><span class="metric-state is-good">Local</span></div>
           <div class="metric-body"><div><div class="metric-reading metric-count"><strong id="processValue">--</strong></div><p id="processDetail">Waiting for process inventory</p></div><div id="processChart" class="metric-gauge" aria-label="Running processes"><span>--</span></div></div>
           <div class="meter" aria-hidden="true"><span id="processMeter"></span></div>
