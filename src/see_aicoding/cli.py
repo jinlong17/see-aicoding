@@ -64,14 +64,6 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return 0
 
-    import psutil
-    from rich.console import Console
-    from rich.live import Live
-
-    from .cursor_ext import scan_installed_extensions
-    from .monitor import History, Sampler, build_sessions
-    from .render import render_all
-
     refresh = max(0.5, args.interval)
     show_tree = not args.no_tree
     hide_idle = not args.all
@@ -80,6 +72,14 @@ def main(argv: list[str] | None = None) -> int:
         from .web import run_web_server
 
         return run_web_server(args.host, args.port, refresh, args.open)
+
+    import psutil
+    from rich.console import Console
+    from rich.live import Live
+
+    from .cursor_ext import scan_installed_extensions
+    from .monitor import History, Sampler, build_sessions
+    from .render import render_all
 
     console = Console()
     sampler = Sampler()
